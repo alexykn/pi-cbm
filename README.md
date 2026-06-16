@@ -40,6 +40,8 @@ Registers:
 - `get_graph_schema`
 - `get_architecture`
 - `search_graph`
+- `resolve_symbol`
+- `read_symbol`
 - `search_code`
 - `get_code_snippet`
 - `trace_path`
@@ -53,13 +55,30 @@ Most tools accept optional `project`. When omitted, the extension infers it from
 
 Notes:
 
+- Use `search_graph` first for symbol/workflow/route/class/function discovery and “where is X implemented?” questions. Use a small limit for targeted lookup.
+- Use `resolve_symbol` when you know a symbol name but need the exact `qualified_name` or need to disambiguate candidates.
+- Use `read_symbol` when you know a symbol name plus enough disambiguators, such as `file_path`, `parent_class`, `label`, `route_path`, or `route_method`, and want source only if the match is unambiguous.
+- `read_symbol` fails closed on ambiguity; if it returns candidates, retry with more disambiguators or use `get_code_snippet` with an exact `qualified_name`.
+- `read_symbol` supports `neighbors: "callers" | "callees" | "both"` plus `neighbor_limit` for direct, compact, source-free surrounding call context. Use `trace_path` for multi-hop workflow or impact tracing.
+- Use `get_code_snippet` when you already have an exact `qualified_name`; prefer `read_symbol` when you have a concrete symbol name plus disambiguators but not the exact `qualified_name`.
+- If the query is a symbol name, prefer `resolve_symbol`/`read_symbol`; if it is an exact non-symbol string or you need all textual occurrences, use `search_code`.
+- Use `search_code` for exact literal text/regex searches such as env vars, config keys, route strings, error messages, constants, template text, comments, and docstrings.
+- Use `trace_path` after identifying an anchor symbol when you need callers, callees, workflow, dependency, data-flow, or blast-radius context. Keep depth shallow by default.
+- Use `get_code_snippet` only after `search_graph`/`search_code` identifies the exact symbol. Keep snippet retrieval targeted instead of bulk-reading many symbols.
+- Use `get_architecture` for broad orientation in unfamiliar repos, not targeted implementation lookup. Requested aspects may be absent if the index has no data for them.
+- Use `get_graph_schema` before non-trivial `query_graph` queries, and keep `query_graph` returned columns narrow.
+- Use `detect_changes` for diff review or blast-radius analysis, not ordinary code lookup.
+- Read obvious README/package/deployment/config manifest paths directly instead of forcing graph tools into file-inspection work.
 - `index_repository` defaults to `mode: "full"`. The current cwd project is already auto-indexed at startup and periodically refreshed, so use this tool mainly for external repository paths or explicit manual refreshes.
 - `trace_path` auto-resolves short function/method names when there is a single unambiguous match; otherwise it returns candidate `qualified_name`s. It also supports explicit plugin-side `exclude_paths` filters.
+- Exploration tools such as `search_graph`, `get_code_snippet`, `trace_path`, `get_architecture`, `search_code`, and `detect_changes` default to compact, location-first output. Less-useful upstream graph metadata such as fingerprints, token fields, and raw metrics is hidden unless `include_metadata: true` is set.
+- Compact output hides analysis metadata, not edit-critical location identity. Symbol-like outputs preserve `file_path`, `start_line`, and `end_line` when available, and the plugin enriches missing locations for resolver, trace, and architecture outputs where possible.
 - Code/source-heavy tools support `full_output` and `max_symbol_lines`. By default, normal-sized symbols are returned in full and only oversized function/method/class-sized blocks are compacted.
-- `search_code` defaults to compact output with small context to avoid flooding the agent context, and oversized per-symbol contexts are compacted unless `full_output=true` or `max_symbol_lines` is increased.
+- `search_code` defaults to compact output with small context to avoid flooding the agent context, and oversized per-symbol contexts are compacted unless `full_output=true` or `max_symbol_lines` is increased. If a result is compacted/truncated, agents should retry the same codebase-memory tool with a higher `max_symbol_lines` or `full_output=true` before falling back to file reads/grep.
 - `query_graph` normalizes common numeric metric columns in the returned rows for easier agent consumption, while still relying on upstream for query execution/order.
-- `manage_adr(mode="store")` is accepted as a compatibility alias for `mode="update"`; ADR writes are allowed by default.
-- `ingest_traces` is exposed for compatibility, but current `codebase-memory-mcp` versions may accept traces without creating runtime graph edges.
+- `manage_adr(mode="store")` is accepted as a compatibility alias for `mode="update"`; use ADR writes only when the user explicitly wants to persist an architectural decision.
+- `ingest_traces` is exposed for compatibility, but current `codebase-memory-mcp` versions may accept traces without creating runtime graph edges. Use only when the user provides traces or asks to test ingestion.
+- `delete_project` is destructive and should only be used on explicit user request with exact project-name confirmation.
 
 ## Typical workflow
 
