@@ -2,14 +2,12 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { buildToolTextResult, callCbmTool, indexTimeoutMs, normalizePathForDisplay, queryTimeoutMs, removeUndefined, saveJsonResult } from "./cbm.js";
-import { defaultRepoPath, inferProject, listProjects } from "./project.js";
+import { buildToolTextResult, callCbmTool, queryTimeoutMs, removeUndefined, saveJsonResult } from "./cbm.js";
+import { inferProject } from "./project.js";
 
-const MODE = StringEnum(["full", "moderate", "fast", "cross-repo-intelligence"] as const);
 const DIRECTION = StringEnum(["inbound", "outbound", "both"] as const);
 const TRACE_MODE = StringEnum(["calls", "data_flow", "cross_service"] as const);
 const SEARCH_CODE_MODE = StringEnum(["compact", "full", "files"] as const);
-const ADR_MODE = StringEnum(["get", "update", "store", "sections"] as const);
 const SYMBOL_LABEL = StringEnum(["Function", "Method", "Class", "Variable", "Type", "Route"] as const);
 const SYMBOL_NEIGHBORS = StringEnum(["none", "callers", "callees", "both"] as const);
 
@@ -1118,58 +1116,6 @@ function renderResult(label: string) {
 
 export function registerCodebaseMemoryTools(pi: ExtensionAPI) {
   pi.registerTool({
-    name: "list_projects",
-    label: "CBM Projects",
-    description: "List indexed codebase-memory projects and root paths.",
-    promptSnippet: "list_projects(): list indexed codebase-memory projects and their root paths",
-    promptGuidelines: [
-      "Use list_projects when the target project is unknown, ambiguous, external to cwd, or a query reports that the project is not indexed.",
-      "Do not call list_projects for normal active-cwd lookups; project inference handles those automatically.",
-    ],
-    parameters: Type.Object({ timeout_ms: TIMEOUT_MS }),
-    async execute(_id, params: { timeout_ms?: number }, signal) {
-      const projects = await listProjects(signal);
-      return buildToolTextResult("Indexed codebase-memory projects", { projects }, { tool: "list_projects" });
-    },
-    renderCall: renderCall("list_projects"),
-    renderResult: renderResult("list_projects"),
-  });
-
-  pi.registerTool({
-    name: "index_repository",
-    label: "CBM Index",
-    description: "Index or refresh a repository graph for codebase-memory.",
-    promptSnippet: "index_repository(repo_path?, mode?): index an external repository or manually refresh a graph",
-    promptGuidelines: [
-      "The plugin automatically indexes the current cwd project in full mode at startup and periodically refreshes it in the background; do not call index_repository for the active project unless an explicit manual refresh is needed.",
-      "Use index_repository mainly for external repository paths that are not the current cwd project.",
-      "index_repository mutates index state and can be slower on large repos; it is an admin/setup tool, not part of normal code lookup.",
-      "Prefer the default mode='full' unless you explicitly need a faster, lower-fidelity refresh.",
-    ],
-    parameters: Type.Object({
-      repo_path: Type.Optional(Type.String({ description: "Repository path. Defaults to current git root." })),
-      mode: Type.Optional(MODE),
-      target_projects: Type.Optional(Type.Array(Type.String())),
-      persistence: Type.Optional(Type.Boolean({ description: "Write .codebase-memory/graph.db.zst for team sharing. Default false." })),
-      timeout_ms: TIMEOUT_MS,
-    }),
-    async execute(_id, params: Record<string, unknown>, signal, onUpdate, ctx) {
-      const repoPath = typeof params.repo_path === "string" && params.repo_path.trim() ? params.repo_path : await defaultRepoPath(ctx.cwd, signal);
-      const args = removeUndefined({
-        repo_path: repoPath,
-        mode: params.mode ?? "full",
-        target_projects: params.target_projects,
-        persistence: params.persistence,
-      });
-      onUpdate?.({ content: [{ type: "text", text: `Indexing ${normalizePathForDisplay(repoPath)}...` }], details: { args } });
-      const result = await callCbmTool("index_repository", args, { signal, timeoutMs: indexTimeoutMs(params.timeout_ms) });
-      return buildToolTextResult("Indexed repository", result.data, { tool: "index_repository", args, stderr: result.stderr });
-    },
-    renderCall: renderCall("index_repository", (args) => (typeof args.repo_path === "string" ? normalizePathForDisplay(args.repo_path) : "current repo")),
-    renderResult: renderResult("index_repository"),
-  });
-
-  pi.registerTool({
     name: "search_graph",
     label: "CBM Search Graph",
     description: "Search the code graph for symbols and implementation locations: functions, methods, classes, routes, controllers, services, and related concepts.",
@@ -1429,23 +1375,6 @@ export function registerCodebaseMemoryTools(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "index_status",
-    label: "CBM Index Status",
-    description: "Check whether the inferred or specified project index is ready.",
-    promptSnippet: "index_status(project?): check whether a project is indexed",
-    promptGuidelines: [
-      "Use index_status when graph queries fail unexpectedly, return empty results, or project inference/readiness is uncertain.",
-      "Do not call index_status before every graph query; the active cwd project is auto-indexed and periodically refreshed.",
-    ],
-    parameters: Type.Object({ project: OPTIONAL_PROJECT, timeout_ms: TIMEOUT_MS }),
-    async execute(_id, params: Record<string, unknown>, _signal, _onUpdate, ctx) {
-      return executeQueryTool("Index status", "index_status", params, ctx);
-    },
-    renderCall: renderCall("index_status"),
-    renderResult: renderResult("index_status"),
-  });
-
-  pi.registerTool({
     name: "detect_changes",
     label: "CBM Detect Changes",
     description: "Analyze local git changes and map them to affected symbols/callers.",
@@ -1472,72 +1401,4 @@ export function registerCodebaseMemoryTools(pi: ExtensionAPI) {
     renderResult: renderResult("detect_changes"),
   });
 
-  pi.registerTool({
-    name: "manage_adr",
-    label: "CBM ADR",
-    description: "Read or persist Architecture Decision Records associated with the indexed project.",
-    promptSnippet: "manage_adr(project?, mode, content?/sections?): persist or retrieve architecture decisions",
-    promptGuidelines: [
-      "Use mode='get' or mode='sections' to read existing architectural decisions.",
-      "Use mode='update' only when the user explicitly wants to persist an architectural decision; it writes persistent ADR state.",
-      "mode='store' is accepted as a compatibility alias for mode='update'.",
-    ],
-    parameters: Type.Object({
-      project: OPTIONAL_PROJECT,
-      mode: ADR_MODE,
-      content: Type.Optional(Type.String()),
-      sections: Type.Optional(Type.Array(Type.String())),
-      timeout_ms: TIMEOUT_MS,
-    }),
-    async execute(_id, params: Record<string, unknown>, _signal, _onUpdate, ctx) {
-      const mode = params.mode === "store" ? "update" : params.mode;
-      if (mode === "update" && typeof params.content !== "string") throw new Error("manage_adr mode='update' requires content.");
-      const normalized = removeUndefined({ ...params, mode });
-      return executeQueryTool("ADR result", "manage_adr", normalized, ctx);
-    },
-    renderCall: renderCall("manage_adr", (args) => String(args.mode ?? "")),
-    renderResult: renderResult("manage_adr"),
-  });
-
-  pi.registerTool({
-    name: "ingest_traces",
-    label: "CBM Ingest Traces",
-    description: "Ingest externally collected runtime traces into the graph.",
-    promptSnippet: "ingest_traces(project?, traces): ingest runtime traces into the code graph",
-    promptGuidelines: [
-      "Use ingest_traces only when the user explicitly provides trace data or asks to test runtime trace ingestion.",
-      "Do not use ingest_traces for normal static code discovery or call tracing; use trace_path instead.",
-      "Runtime trace ingestion is experimental and may not enrich the graph yet.",
-    ],
-    parameters: Type.Object({ project: OPTIONAL_PROJECT, traces: Type.Array(Type.Object({})), timeout_ms: TIMEOUT_MS }),
-    async execute(_id, params: Record<string, unknown>, _signal, _onUpdate, ctx) {
-      return executeQueryTool("Trace ingestion result", "ingest_traces", params, ctx);
-    },
-    renderCall: renderCall("ingest_traces"),
-    renderResult: renderResult("ingest_traces"),
-  });
-
-  pi.registerTool({
-    name: "delete_project",
-    label: "CBM Delete Project",
-    description: "Delete an indexed codebase-memory project.",
-    promptGuidelines: [
-      "Never call delete_project automatically or for routine cleanup/troubleshooting.",
-      "Use delete_project only when the user explicitly requests deletion and confirms the exact project name.",
-    ],
-    parameters: Type.Object({ project: OPTIONAL_PROJECT, confirm_project_name: Type.String(), timeout_ms: TIMEOUT_MS }),
-    async execute(_id, params: Record<string, unknown>, _signal, _onUpdate, ctx) {
-      const args = await withProject(params, ctx);
-      const project = String(args.project ?? "");
-      if (params.confirm_project_name !== project) throw new Error("confirm_project_name must exactly match project.");
-      if (ctx.hasUI) {
-        const ok = await ctx.ui.confirm("Delete codebase-memory project?", `Delete indexed project '${project}'?`);
-        if (!ok) throw new Error("delete_project cancelled by user");
-      }
-      const result = await callCbmTool("delete_project", { project }, { signal: ctx.signal, timeoutMs: queryTimeoutMs(params.timeout_ms) });
-      return buildToolTextResult("Deleted project", result.data, { tool: "delete_project", args, stderr: result.stderr });
-    },
-    renderCall: renderCall("delete_project", (args) => String(args.project ?? "")),
-    renderResult: renderResult("delete_project"),
-  });
 }
