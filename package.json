@@ -1,6 +1,6 @@
 {
   "name": "pi-cbm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "codebase-memory-mcp tools for pi.",
   "main": "./src/index.ts",
