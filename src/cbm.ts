@@ -10,7 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_BINARY = "codebase-memory-mcp";
-const FALLBACK_BINARY_PATHS = ["/Users/alxknt/.local/bin/codebase-memory-mcp", "~/.local/bin/codebase-memory-mcp"];
+const FALLBACK_BINARY_PATHS = ["~/.local/bin/codebase-memory-mcp"];
 const DEFAULT_QUERY_TIMEOUT_MS = 60_000;
 const DEFAULT_INDEX_TIMEOUT_MS = 20 * 60_000;
 const MAX_STDIO_BYTES = 50 * 1024 * 1024;

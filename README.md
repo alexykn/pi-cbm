@@ -1,8 +1,12 @@
-# pi-codebase-memory
+# pi-cbm
 
 Pi extension that exposes [`codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp) as native Pi tools.
 
 This package does not implement an MCP client. It uses `codebase-memory-mcp cli --json <tool> <args>` and registers the core tools directly with Pi. When a Pi session starts, it automatically indexes the current git root in full mode in the background, then periodically refreshes it so graph tools stay current.
+
+## Security
+
+Pi extensions run with your local user permissions. This extension also shells out to the `codebase-memory-mcp` binary installed on your machine, so install both this package and `codebase-memory-mcp` only from sources you trust.
 
 ## Requirements
 
@@ -15,19 +19,19 @@ curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/i
 If the binary is not on `PATH`, set:
 
 ```sh
-export CODEBASE_MEMORY_MCP_BIN=/Users/alxknt/.local/bin/codebase-memory-mcp
+export CODEBASE_MEMORY_MCP_BIN="$HOME/.local/bin/codebase-memory-mcp"
 ```
 
 ## Install
 
 ```sh
-pi install /Users/alxknt/github/pi-codebase-memory
+pi install npm:pi-cbm
 ```
 
 Or test for one run:
 
 ```sh
-pi -e /Users/alxknt/github/pi-codebase-memory
+pi -e npm:pi-cbm
 ```
 
 ## Tools

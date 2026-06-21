@@ -1,5 +1,5 @@
 {
-  "name": "pi-codebase-memory",
+  "name": "pi-cbm",
   "version": "0.1.0",
   "type": "module",
   "description": "codebase-memory-mcp tools for pi.",
@@ -22,21 +22,30 @@
     ]
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "typebox": "^1.1.38"
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck",
+    "prepack": "npm run check"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.75.5",
     "@earendil-works/pi-coding-agent": "^0.75.5",
     "@earendil-works/pi-tui": "^0.75.5",
     "@types/node": "^25.9.1",
+    "typebox": "^1.1.38",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*"
-  }
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexykn/pi-cbm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alexykn/pi-cbm/issues"
+  },
+  "homepage": "https://github.com/alexykn/pi-cbm#readme"
 }
