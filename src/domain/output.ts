@@ -1,4 +1,6 @@
-import { buildToolTextResult, removeUndefined, saveJsonResult } from "./cbm.js";
+import { buildToolTextResult, saveJsonResult } from "../cbm/result.js";
+import { clampInt } from "../shared/numbers.js";
+import { isRecord, pickDefined, removeUndefined } from "../shared/object.js";
 
 const DEFAULT_MAX_SYMBOL_LINES = 220;
 const MIN_MAX_SYMBOL_LINES = 40;
@@ -23,14 +25,7 @@ type CompactionResult = {
   compacted: boolean;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
-function clampInt(value: unknown, fallback: number, min: number, max: number): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
-  return Math.max(min, Math.min(Math.floor(value), max));
-}
 
 function outputControls(params: Record<string, unknown>): OutputControls {
   return {
@@ -222,14 +217,6 @@ function firstDocLine(value: unknown): unknown {
   return line;
 }
 
-function pickDefined(source: Record<string, unknown>, keys: string[]): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const key of keys) {
-    const value = source[key];
-    if (value !== undefined) result[key] = value;
-  }
-  return result;
-}
 
 function compactSymbolLike(item: unknown, options: { includeSource?: boolean; includeMatches?: boolean } = {}): unknown {
   if (!isRecord(item)) return item;
@@ -438,7 +425,7 @@ function projectMetadata(toolName: string, data: unknown, controls: OutputContro
   }
 }
 
-export async function buildCompactableToolResult(
+async function buildCompactableToolResult(
   title: string,
   data: unknown,
   params: Record<string, unknown>,
@@ -469,4 +456,15 @@ export async function buildCompactableToolResult(
   }
 
   return buildToolTextResult(title, compaction.data, resultDetails);
+}
+
+export class OutputService {
+  buildCompactableToolResult(
+    title: string,
+    data: unknown,
+    params: Record<string, unknown>,
+    details: Record<string, unknown>,
+  ) {
+    return buildCompactableToolResult(title, data, params, details);
+  }
 }

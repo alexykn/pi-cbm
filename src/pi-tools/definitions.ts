@@ -1,5 +1,12 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import type { CbmClient } from "../cbm/client.js";
+import type { OutputService } from "../domain/output.js";
+import type { ProjectService, ToolExecutionContext } from "../domain/project.js";
+import type { QueryService } from "../domain/query.js";
+import type { SymbolService } from "../domain/symbols.js";
+import type { TraceService } from "../domain/trace.js";
+import type { ToolTextResult } from "../cbm/result.js";
+import { renderCall, renderResult } from "./render.js";
 import {
   DIRECTION,
   EXPLORATION_OUTPUT_CONTROL_PARAMS,
@@ -11,17 +18,31 @@ import {
   SYMBOL_NEIGHBORS,
   TIMEOUT_MS,
   TRACE_MODE,
-  executeQueryGraph,
-  executeQueryTool,
-  executeReadSymbol,
-  executeResolveSymbol,
-  executeTracePath,
-  renderCall,
-  renderResult,
-} from "./tool-services.js";
+} from "./schemas.js";
 
-export function registerCodebaseMemoryTools(pi: ExtensionAPI) {
-  pi.registerTool({
+export type CbmServices = {
+  cbm: CbmClient;
+  projects: ProjectService;
+  output: OutputService;
+  symbols: SymbolService;
+  trace: TraceService;
+  query: QueryService;
+};
+
+export type ToolDefinition = {
+  name: string;
+  label: string;
+  description: string;
+  promptSnippet: string;
+  promptGuidelines: string[];
+  parameters: unknown;
+  execute(params: Record<string, unknown>, services: CbmServices, ctx: ToolExecutionContext): Promise<ToolTextResult>;
+  renderCall?: (args: Record<string, unknown>, theme: any) => unknown;
+  renderResult?: (result: { details?: Record<string, unknown> }, options: unknown, theme: any) => unknown;
+};
+
+export const toolDefinitions: ToolDefinition[] = [
+  {
     name: "search_graph",
     label: "CBM Search Graph",
     description: "Search the code graph for symbols and implementation locations: functions, methods, classes, routes, controllers, services, and related concepts.",
@@ -54,14 +75,11 @@ export function registerCodebaseMemoryTools(pi: ExtensionAPI) {
       ...EXPLORATION_OUTPUT_CONTROL_PARAMS,
       timeout_ms: TIMEOUT_MS,
     }),
-    async execute(_id, params: Record<string, unknown>, signal, _onUpdate, ctx) {
-      return executeQueryTool("Graph search results", "search_graph", { limit: 25, ...params }, ctx);
-    },
+    execute: (params, services, ctx) => services.query.executeQueryTool("Graph search results", "search_graph", { limit: 25, ...params }, ctx),
     renderCall: renderCall("search_graph", (args) => String(args.query ?? args.name_pattern ?? args.semantic_query ?? "")),
     renderResult: renderResult("search_graph"),
-  });
-
-  pi.registerTool({
+  },
+  {
     name: "resolve_symbol",
     label: "CBM Resolve Symbol",
     description: "Resolve a symbol name to compact candidate identities without returning source.",
@@ -85,14 +103,11 @@ export function registerCodebaseMemoryTools(pi: ExtensionAPI) {
       ...METADATA_CONTROL_PARAMS,
       timeout_ms: TIMEOUT_MS,
     }),
-    async execute(_id, params: Record<string, unknown>, _signal, _onUpdate, ctx) {
-      return executeResolveSymbol(params, ctx);
-    },
+    execute: (params, services, ctx) => services.symbols.resolve(params, ctx),
     renderCall: renderCall("resolve_symbol", (args) => String(args.name ?? args.qualified_name ?? "")),
     renderResult: renderResult("resolve_symbol"),
-  });
-
-  pi.registerTool({
+  },
+  {
     name: "read_symbol",
     label: "CBM Read Symbol",
     description: "Resolve a symbol name and read its source only when the match is unambiguous.",
@@ -121,14 +136,11 @@ export function registerCodebaseMemoryTools(pi: ExtensionAPI) {
       ...EXPLORATION_OUTPUT_CONTROL_PARAMS,
       timeout_ms: TIMEOUT_MS,
     }),
-    async execute(_id, params: Record<string, unknown>, _signal, _onUpdate, ctx) {
-      return executeReadSymbol(params, ctx);
-    },
+    execute: (params, services, ctx) => services.symbols.read(params, ctx),
     renderCall: renderCall("read_symbol", (args) => String(args.name ?? args.qualified_name ?? "")),
     renderResult: renderResult("read_symbol"),
-  });
-
-  pi.registerTool({
+  },
+  {
     name: "get_code_snippet",
     label: "CBM Snippet",
     description: "Retrieve compact source for a known graph symbol by qualified_name.",
@@ -148,14 +160,11 @@ export function registerCodebaseMemoryTools(pi: ExtensionAPI) {
       ...EXPLORATION_OUTPUT_CONTROL_PARAMS,
       timeout_ms: TIMEOUT_MS,
     }),
-    async execute(_id, params: Record<string, unknown>, _signal, _onUpdate, ctx) {
-      return executeQueryTool("Code snippet", "get_code_snippet", params, ctx);
-    },
+    execute: (params, services, ctx) => services.query.executeQueryTool("Code snippet", "get_code_snippet", params, ctx),
     renderCall: renderCall("get_code_snippet", (args) => String(args.qualified_name ?? "")),
     renderResult: renderResult("get_code_snippet"),
-  });
-
-  pi.registerTool({
+  },
+  {
     name: "trace_path",
     label: "CBM Trace",
     description: "Trace callers, callees, data flow, or cross-service paths from a known anchor function/method.",
@@ -184,14 +193,11 @@ export function registerCodebaseMemoryTools(pi: ExtensionAPI) {
       ...EXPLORATION_OUTPUT_CONTROL_PARAMS,
       timeout_ms: TIMEOUT_MS,
     }),
-    async execute(_id, params: Record<string, unknown>, _signal, _onUpdate, ctx) {
-      return executeTracePath(params, ctx);
-    },
+    execute: (params, services, ctx) => services.trace.trace(params, ctx),
     renderCall: renderCall("trace_path", (args) => `${String(args.function_name ?? "")} ${String(args.direction ?? "both")}`),
     renderResult: renderResult("trace_path"),
-  });
-
-  pi.registerTool({
+  },
+  {
     name: "get_architecture",
     label: "CBM Architecture",
     description: "Get a compact high-level architecture overview: hotspots, routes/entry points, packages, dependencies, and layers when available.",
@@ -205,14 +211,11 @@ export function registerCodebaseMemoryTools(pi: ExtensionAPI) {
       "If returned code/source context is compacted, retry with a higher max_symbol_lines or full_output=true before falling back to read/grep.",
     ],
     parameters: Type.Object({ project: OPTIONAL_PROJECT, aspects: Type.Optional(Type.Array(Type.String())), ...EXPLORATION_OUTPUT_CONTROL_PARAMS, timeout_ms: TIMEOUT_MS }),
-    async execute(_id, params: Record<string, unknown>, _signal, _onUpdate, ctx) {
-      return executeQueryTool("Architecture overview", "get_architecture", params, ctx);
-    },
+    execute: (params, services, ctx) => services.query.executeQueryTool("Architecture overview", "get_architecture", params, ctx),
     renderCall: renderCall("get_architecture"),
     renderResult: renderResult("get_architecture"),
-  });
-
-  pi.registerTool({
+  },
+  {
     name: "get_graph_schema",
     label: "CBM Schema",
     description: "Inspect available graph labels, edge types, and properties.",
@@ -222,14 +225,11 @@ export function registerCodebaseMemoryTools(pi: ExtensionAPI) {
       "Use sparingly; it is schema metadata and may be verbose. Do not use it for normal symbol lookup.",
     ],
     parameters: Type.Object({ project: OPTIONAL_PROJECT, timeout_ms: TIMEOUT_MS }),
-    async execute(_id, params: Record<string, unknown>, _signal, _onUpdate, ctx) {
-      return executeQueryTool("Graph schema", "get_graph_schema", params, ctx);
-    },
+    execute: (params, services, ctx) => services.query.executeQueryTool("Graph schema", "get_graph_schema", params, ctx),
     renderCall: renderCall("get_graph_schema"),
     renderResult: renderResult("get_graph_schema"),
-  });
-
-  pi.registerTool({
+  },
+  {
     name: "query_graph",
     label: "CBM Query Graph",
     description: "Run read-only Cypher-like graph queries for custom structural questions, aggregations, and multi-hop relationships.",
@@ -242,14 +242,11 @@ export function registerCodebaseMemoryTools(pi: ExtensionAPI) {
       "Treat numeric sorting/ranking queries cautiously: the plugin normalizes common numeric result values for display, but upstream query ordering may still be unreliable.",
     ],
     parameters: Type.Object({ query: Type.String(), project: OPTIONAL_PROJECT, max_rows: Type.Optional(Type.Number({ default: 200 })), ...OUTPUT_CONTROL_PARAMS, timeout_ms: TIMEOUT_MS }),
-    async execute(_id, params: Record<string, unknown>, _signal, _onUpdate, ctx) {
-      return executeQueryGraph(params, ctx);
-    },
+    execute: (params, services, ctx) => services.query.queryGraph(params, ctx),
     renderCall: renderCall("query_graph", (args) => String(args.query ?? "").slice(0, 80)),
     renderResult: renderResult("query_graph"),
-  });
-
-  pi.registerTool({
+  },
+  {
     name: "search_code",
     label: "CBM Search Code",
     description: "Literal text/regex search over indexed files, enriched with symbol-grouped context.",
@@ -273,14 +270,11 @@ export function registerCodebaseMemoryTools(pi: ExtensionAPI) {
       ...EXPLORATION_OUTPUT_CONTROL_PARAMS,
       timeout_ms: TIMEOUT_MS,
     }),
-    async execute(_id, params: Record<string, unknown>, _signal, _onUpdate, ctx) {
-      return executeQueryTool("Code search results", "search_code", { mode: "compact", context: 2, limit: 10, ...params }, ctx);
-    },
+    execute: (params, services, ctx) => services.query.executeQueryTool("Code search results", "search_code", { mode: "compact", context: 2, limit: 10, ...params }, ctx),
     renderCall: renderCall("search_code", (args) => String(args.pattern ?? "")),
     renderResult: renderResult("search_code"),
-  });
-
-  pi.registerTool({
+  },
+  {
     name: "detect_changes",
     label: "CBM Detect Changes",
     description: "Analyze local git changes and map them to affected symbols/callers.",
@@ -300,11 +294,8 @@ export function registerCodebaseMemoryTools(pi: ExtensionAPI) {
       ...EXPLORATION_OUTPUT_CONTROL_PARAMS,
       timeout_ms: TIMEOUT_MS,
     }),
-    async execute(_id, params: Record<string, unknown>, _signal, _onUpdate, ctx) {
-      return executeQueryTool("Change impact results", "detect_changes", params, ctx);
-    },
+    execute: (params, services, ctx) => services.query.executeQueryTool("Change impact results", "detect_changes", params, ctx),
     renderCall: renderCall("detect_changes"),
     renderResult: renderResult("detect_changes"),
-  });
-
-}
+  },
+];
