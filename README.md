@@ -4,16 +4,89 @@ Pi extension that exposes [`codebase-memory-mcp`](https://github.com/DeusData/co
 
 This package does not implement an MCP client. It uses `codebase-memory-mcp cli --json <tool> <args>` and registers the core tools directly with Pi. When a Pi session starts, it automatically indexes the current git root in full mode in the background, then periodically refreshes it so graph tools stay current.
 
+## What makes this different
+
+`codebase-memory-mcp` already provides a fast local code graph. `pi-cbm` adapts it for Pi agents in a way that is deliberately optimized for agent workflows:
+
+- **Token-saving output by default.** Several upstream tools return rich graph metadata, fingerprints, scores, and raw analysis fields. `pi-cbm` strips less-useful metadata by default and returns compact, location-first results. Use `include_metadata: true` when you need the full upstream payload.
+- **Source compaction controls.** Tools that may return code support `full_output` and `max_symbol_lines`. Normal-sized symbols are returned directly; oversized code blocks are compacted and the full uncompacted JSON is saved to a temp file.
+- **Symbol-first helpers.** Upstream `get_code_snippet` works best when you already know the exact `qualified_name`. `pi-cbm` adds `resolve_symbol` and `read_symbol` so the agent can start from a normal symbol name, disambiguate with file/class/route filters, and only read source when the match is unambiguous.
+- **Safe-by-default symbol reading.** `read_symbol` fails closed on ambiguity: it returns candidate identities instead of guessing and reading the wrong source. When exactly one symbol matches, it calls upstream `get_code_snippet` and can optionally include compact direct callers/callees.
+- **Current project stays indexed.** On Pi session start, the extension indexes the current git root in full mode and refreshes it periodically in the background. Agents can usually call graph tools immediately without asking you to run indexing commands.
+- **Project inference for cwd workflows.** Most tools accept optional `project`, but for normal current-repo work the extension infers the indexed project from Pi's current working directory.
+- **Query tools only.** The agent gets code-exploration tools, not administrative controls. `index_repository` and `list_projects` are used internally for background indexing and project inference; destructive/admin MCP tools such as project deletion are not registered as Pi tools.
+
 ## Security
 
 Pi extensions run with your local user permissions. This extension also shells out to the `codebase-memory-mcp` binary installed on your machine, so install both this package and `codebase-memory-mcp` only from sources you trust.
 
-## Requirements
+## Requirements: install codebase-memory-mcp
 
-Install `codebase-memory-mcp` first:
+Install [`codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp) first. These are the upstream recommended install paths.
+
+### macOS / Linux
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash
+```
+
+With the optional graph visualization UI:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash -s -- --ui
+```
+
+### Windows PowerShell
+
+```powershell
+# 1. Download the installer
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.ps1 -OutFile install.ps1
+
+# 2. Optional but recommended: inspect the script
+notepad install.ps1
+
+# 3. Run it
+.\install.ps1
+```
+
+Useful installer options from upstream:
+
+- `--ui` — install the graph visualization variant.
+- `--skip-config` — install the binary only, without configuring other agents.
+- `--dir=<path>` — install to a custom location.
+
+### Arch Linux AUR
+
+```sh
+yay -S codebase-memory-mcp-bin
+```
+
+or:
+
+```sh
+paru -S codebase-memory-mcp-bin
+```
+
+### Manual release archive
+
+Download the archive for your platform from the [latest codebase-memory-mcp release](https://github.com/DeusData/codebase-memory-mcp/releases/latest):
+
+- `codebase-memory-mcp-<platform>-<arch>.tar.gz` for macOS/Linux.
+- `codebase-memory-mcp-windows-amd64.zip` for Windows.
+- `codebase-memory-mcp-ui-...` variants include the graph visualization UI.
+
+Then extract and run the included installer:
+
+```sh
+tar xzf codebase-memory-mcp-*.tar.gz
+./install.sh
+```
+
+Windows PowerShell:
+
+```powershell
+Expand-Archive codebase-memory-mcp-windows-amd64.zip -DestinationPath .
+.\install.ps1
 ```
 
 If the binary is not on `PATH`, set:
