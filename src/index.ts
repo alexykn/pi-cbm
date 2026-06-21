@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { callCbmTool, indexTimeoutMs } from "./cbm.js";
 import { defaultRepoPath } from "./project.js";
-import { registerCodebaseMemoryTools } from "./tools.js";
+import { registerCodebaseMemoryTools } from "./tool-registry.js";
 
 const AUTO_INDEX_MODE = "full";
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
