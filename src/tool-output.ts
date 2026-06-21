@@ -341,7 +341,18 @@ function compactTraceDataForOutput(data: unknown): MetadataProjection {
 
 function compactSearchCodeData(data: unknown): MetadataProjection {
   if (!isRecord(data)) return { data, pruned: false };
-  const compact = pickDefined(data, ["pattern", "total_grep_matches", "total_results", "dedup_ratio", "has_more", "limit", "offset"]);
+  const compact = pickDefined(data, [
+    "pattern",
+    "files",
+    "directories",
+    "total_grep_matches",
+    "total_results",
+    "raw_match_count",
+    "dedup_ratio",
+    "has_more",
+    "limit",
+    "offset",
+  ]);
   if (Array.isArray(data.results)) compact.results = compactSymbolArray(data.results, { includeSource: true, includeMatches: true });
   return { data: appendMetadataHint(compact), pruned: true };
 }
