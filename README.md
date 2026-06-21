@@ -1,12 +1,10 @@
 # pi-cbm
 
-Pi extension that exposes [`codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp) as native Pi tools.
+Pi extension that exposes [`codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp) as native Pi tools. `codebase-memory-mcp provides a fast local code graph. pi-cbm adds auto-indexing and adapts it for Pi agents in a way that is deliberately optimized for agent workflows and token saving.
 
 This package does not implement an MCP client. It uses `codebase-memory-mcp cli --json <tool> <args>` and registers the core tools directly with Pi. When a Pi session starts, it automatically indexes the current git root in full mode in the background, then periodically refreshes it so graph tools stay current.
 
 ## What makes this different
-
-`codebase-memory-mcp` already provides a fast local code graph. `pi-cbm` adapts it for Pi agents in a way that is deliberately optimized for agent workflows:
 
 - **Token-saving output by default.** Several upstream tools return rich graph metadata, fingerprints, scores, and raw analysis fields. `pi-cbm` strips less-useful metadata by default and returns compact, location-first results. Use `include_metadata: true` when you need the full upstream payload.
 - **Source compaction controls.** Tools that may return code support `full_output` and `max_symbol_lines`. Normal-sized symbols are returned directly; oversized code blocks are compacted and the full uncompacted JSON is saved to a temp file.
