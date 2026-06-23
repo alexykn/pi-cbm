@@ -2,7 +2,7 @@
   "name": "pi-cbm",
   "version": "0.2.1",
   "type": "module",
-  "description": "codebase-memory-mcp tools for pi.",
+  "description": "Extension that exposes `codebase-memory-mcp` as native Pi tools, adds auto-indexing and deliberate obtimizations for agent-workflows and token saving.",
   "main": "./src/index.ts",
   "files": [
     "src/",

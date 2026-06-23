@@ -10,6 +10,7 @@ This package does not implement an MCP client. It uses `codebase-memory-mcp cli 
 - **Source compaction controls.** Tools that may return code support `full_output` and `max_symbol_lines`. Normal-sized symbols are returned directly; oversized code blocks are compacted and the full uncompacted JSON is saved to a temp file.
 - **Symbol-first helpers.** Upstream `get_code_snippet` works best when you already know the exact `qualified_name`. `pi-cbm` adds `resolve_symbol` and `read_symbol` so the agent can start from a normal symbol name, disambiguate with file/class/route filters, and only read source when the match is unambiguous.
 - **Safe-by-default symbol reading.** `read_symbol` fails closed on ambiguity: it returns candidate identities instead of guessing and reading the wrong source. When exactly one symbol matches, it calls upstream `get_code_snippet` and can optionally include compact direct callers/callees.
+- **Batch source-reading workflows.** `get_code_snippets`, `read_symbols`, and `search_and_read_symbols` let agents inspect several relevant symbols in one tool call instead of looping through many single-symbol calls. These batch tools keep the same compact metadata defaults while preserving essential locations, per-item ambiguity/error results, and source compaction controls.
 - **Current project stays indexed.** On Pi session start, the extension indexes the current git root in full mode and refreshes it periodically in the background. Agents can usually call graph tools immediately without asking you to run indexing commands.
 - **Project inference for cwd workflows.** Most tools accept optional `project`, but for normal current-repo work the extension infers the indexed project from Pi's current working directory.
 - **Query tools only.** The agent gets code-exploration tools, not administrative controls. `index_repository` and `list_projects` are used internally for background indexing and project inference; destructive/admin MCP tools such as project deletion are not registered as Pi tools.
@@ -114,8 +115,11 @@ Registers:
 - `search_graph`
 - `resolve_symbol`
 - `read_symbol`
+- `read_symbols`
 - `search_code`
 - `get_code_snippet`
+- `get_code_snippets`
+- `search_and_read_symbols`
 - `trace_path`
 - `query_graph`
 - `detect_changes`
@@ -125,11 +129,14 @@ Most tools accept optional `project`. When omitted, the extension infers it from
 Notes:
 
 - Use `search_graph` first for symbol/workflow/route/class/function discovery and “where is X implemented?” questions. Use a small limit for targeted lookup.
+- Use `search_and_read_symbols` when you need to both discover implementation locations and inspect source for the top matches. Prefer it over `search_graph` followed by many individual snippet reads. Keep `read_limit` small, usually 3–8.
 - Use `resolve_symbol` when you know a symbol name but need the exact `qualified_name` or need to disambiguate candidates.
 - Use `read_symbol` when you know a symbol name plus enough disambiguators, such as `file_path`, `parent_class`, `label`, `route_path`, or `route_method`, and want source only if the match is unambiguous.
+- Use `read_symbols` when you know multiple concrete symbol names and need their source in one call. Each item fails closed on ambiguity like `read_symbol`; retry only ambiguous items with stronger disambiguators.
 - `read_symbol` fails closed on ambiguity; if it returns candidates, retry with more disambiguators or use `get_code_snippet` with an exact `qualified_name`.
 - `read_symbol` supports `neighbors: "callers" | "callees" | "both"` plus `neighbor_limit` for direct, compact, source-free surrounding call context. Use `trace_path` for multi-hop workflow or impact tracing.
 - Use `get_code_snippet` when you already have an exact `qualified_name`; prefer `read_symbol` when you have a concrete symbol name plus disambiguators but not the exact `qualified_name`.
+- Use `get_code_snippets` when you already have multiple exact `qualified_name` values from search, trace, or query results. Prefer it over repeated `get_code_snippet` calls.
 - If the query is a symbol name, prefer `resolve_symbol`/`read_symbol`; if it is an exact non-symbol string or you need all textual occurrences, use `search_code`.
 - Use `search_code` for exact literal text/regex searches such as env vars, config keys, route strings, error messages, constants, template text, comments, and docstrings.
 - Use `trace_path` after identifying an anchor symbol when you need callers, callees, workflow, dependency, data-flow, or blast-radius context. Keep depth shallow by default.
@@ -140,6 +147,7 @@ Notes:
 - Read obvious README/package/deployment/config manifest paths directly instead of forcing graph tools into file-inspection work.
 - `trace_path` auto-resolves short function/method names when there is a single unambiguous match; otherwise it returns candidate `qualified_name`s. It also supports explicit plugin-side `exclude_paths` filters.
 - Exploration tools such as `search_graph`, `get_code_snippet`, `trace_path`, `get_architecture`, `search_code`, and `detect_changes` default to compact, location-first output. Less-useful upstream graph metadata such as fingerprints, token fields, and raw metrics is hidden unless `include_metadata: true` is set.
+- Batch/source tools such as `get_code_snippets`, `read_symbols`, and `search_and_read_symbols` use the same compact metadata defaults: they preserve essential identity such as `file_path`, `start_line`, `end_line`, `qualified_name`, signatures, and route fields while stripping less-useful raw graph metadata unless `include_metadata: true` is set.
 - Compact output hides analysis metadata, not edit-critical location identity. Symbol-like outputs preserve `file_path`, `start_line`, and `end_line` when available, and the plugin enriches missing locations for resolver, trace, and architecture outputs where possible.
 - Code/source-heavy tools support `full_output` and `max_symbol_lines`. By default, normal-sized symbols are returned in full and only oversized function/method/class-sized blocks are compacted.
 - `search_code` defaults to compact output with small context to avoid flooding the agent context, and oversized per-symbol contexts are compacted unless `full_output=true` or `max_symbol_lines` is increased. If a result is compacted/truncated, agents should retry the same codebase-memory tool with a higher `max_symbol_lines` or `full_output=true` before falling back to file reads/grep.

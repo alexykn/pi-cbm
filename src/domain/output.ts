@@ -316,6 +316,54 @@ function compactReadSymbolData(data: unknown): MetadataProjection {
   return { data: { resolved: data.resolved, ...snippet.data }, pruned: snippet.pruned };
 }
 
+function compactBatchSourceResult(item: unknown): unknown {
+  if (!isRecord(item)) return item;
+  const compact = pickDefined(item, [
+    "index",
+    "rank",
+    "status",
+    "request",
+    "qualified_name",
+    "query",
+    "considered_candidates",
+    "error",
+    "hint",
+  ]);
+
+  if (isRecord(item.resolved)) compact.resolved = compactSymbolLike(item.resolved);
+  if (isRecord(item.search_result)) compact.search_result = compactSymbolLike(item.search_result);
+  if (Array.isArray(item.candidates)) compact.candidates = compactSymbolArray(item.candidates);
+
+  if (isRecord(item.snippet)) {
+    compact.snippet = compactCodeSnippetData(item.snippet).data;
+  } else if (item.snippet !== undefined) {
+    compact.snippet = item.snippet;
+  }
+
+  return compact;
+}
+
+function compactBatchSourceData(data: unknown): MetadataProjection {
+  if (!isRecord(data)) return { data, pruned: false };
+  const compact = pickDefined(data, [
+    "project",
+    "requested_count",
+    "returned_count",
+    "read_count",
+    "ok_count",
+    "ambiguous_count",
+    "not_found_count",
+    "failed_count",
+    "error_count",
+    "max_concurrency",
+    "search",
+  ]);
+
+  if (Array.isArray(data.results)) compact.results = data.results.map(compactBatchSourceResult);
+  if (Array.isArray(data.unread_candidates)) compact.unread_candidates = compactSymbolArray(data.unread_candidates);
+  return { data: appendMetadataHint(compact), pruned: true };
+}
+
 function compactTraceDataForOutput(data: unknown): MetadataProjection {
   if (!isRecord(data)) return { data, pruned: false };
   const compact = pickDefined(data, ["function", "resolved_function", "direction", "mode", "parameter_name", "depth"]);
@@ -410,6 +458,10 @@ function projectMetadata(toolName: string, data: unknown, controls: OutputContro
       return compactSearchGraphData(data);
     case "get_code_snippet":
       return compactCodeSnippetData(data);
+    case "get_code_snippets":
+    case "read_symbols":
+    case "search_and_read_symbols":
+      return compactBatchSourceData(data);
     case "read_symbol":
       return compactReadSymbolData(data);
     case "trace_path":
