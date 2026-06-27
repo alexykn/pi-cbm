@@ -5,6 +5,7 @@ import type { ProjectService, ToolExecutionContext } from "../domain/project.js"
 import type { QueryService } from "../domain/query.js";
 import type { SymbolService } from "../domain/symbols.js";
 import type { TraceService } from "../domain/trace.js";
+import type { CbmRuntimeSettings } from "../extension/runtime-settings.js";
 import type { ToolTextResult } from "../cbm/result.js";
 import { renderCall, renderResult } from "./render.js";
 import {
@@ -29,6 +30,7 @@ export type CbmServices = {
   symbols: SymbolService;
   trace: TraceService;
   query: QueryService;
+  settings: CbmRuntimeSettings;
 };
 
 export type ToolDefinition = {

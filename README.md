@@ -2,7 +2,7 @@
 
 Pi extension that exposes [`codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp) as native Pi tools. `codebase-memory-mcp provides a fast local code graph. pi-cbm adds auto-indexing and adapts it for Pi agents in a way that is deliberately optimized for agent workflows and token saving.
 
-This package does not implement an MCP client. It uses `codebase-memory-mcp cli --json <tool> <args>` and registers the core tools directly with Pi. When a Pi session starts, it automatically indexes the current git root in full mode in the background, then periodically refreshes it so graph tools stay current.
+This package does not implement an MCP client. It uses `codebase-memory-mcp cli --json <tool> <args>` and registers the core tools directly with Pi. When a Pi session starts, it automatically indexes the current git root, or a safe non-git working directory when enabled, in full mode in the background, then periodically refreshes it so graph tools stay current.
 
 ## What makes this different
 
@@ -11,7 +11,7 @@ This package does not implement an MCP client. It uses `codebase-memory-mcp cli 
 - **Symbol-first helpers.** Upstream `get_code_snippet` works best when you already know the exact `qualified_name`. `pi-cbm` adds `resolve_symbol` and `read_symbol` so the agent can start from a normal symbol name, disambiguate with file/class/route filters, and only read source when the match is unambiguous.
 - **Safe-by-default symbol reading.** `read_symbol` fails closed on ambiguity: it returns candidate identities instead of guessing and reading the wrong source. When exactly one symbol matches, it calls upstream `get_code_snippet` and can optionally include compact direct callers/callees.
 - **Batch source-reading workflows.** `get_code_snippets`, `read_symbols`, and `search_and_read_symbols` let agents inspect several relevant symbols in one tool call instead of looping through many single-symbol calls. These batch tools keep the same compact metadata defaults while preserving essential locations, per-item ambiguity/error results, and source compaction controls.
-- **Current project stays indexed.** On Pi session start, the extension indexes the current git root in full mode and refreshes it periodically in the background. Agents can usually call graph tools immediately without asking you to run indexing commands.
+- **Current project stays indexed.** On Pi session start, the extension indexes the current git root, or a safe non-git working directory when enabled, in full mode and refreshes it periodically in the background. Root, home, system, and common builtin OS directories are never auto-indexed.
 - **Project inference for cwd workflows.** Most tools accept optional `project`, but for normal current-repo work the extension infers the indexed project from Pi's current working directory.
 - **Query tools only.** The agent gets code-exploration tools, not administrative controls. `index_repository` and `list_projects` are used internally for background indexing and project inference; destructive/admin MCP tools such as project deletion are not registered as Pi tools.
 
@@ -125,6 +125,19 @@ Registers:
 - `detect_changes`
 
 Most tools accept optional `project`. When omitted, the extension infers it from indexed project roots matching Pi's current working directory. Agents should omit `project` for cwd/current-project work and provide it only when intentionally querying an external indexed project.
+
+## Commands
+
+### `/cbm`
+
+Open the pi-cbm settings menu:
+
+- `/cbm menu` — show the interactive settings menu.
+- `/cbm status` — show auto-index settings.
+- `/cbm enable-non-git` — auto-index safe non-git working directories.
+- `/cbm disable-non-git` — only auto-index git repositories.
+
+Non-git auto-indexing is enabled by default to preserve normal cwd workflows. The unsafe-path guard is always enabled: filesystem roots, home directories, system directories, and common macOS/Linux builtin directories are skipped with a status message explaining why.
 
 Notes:
 

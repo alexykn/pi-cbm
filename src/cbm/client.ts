@@ -8,7 +8,7 @@ import { DEFAULT_QUERY_TIMEOUT_MS } from "./timeouts.js";
 const MAX_STDIO_BYTES = 50 * 1024 * 1024;
 
 export class CbmClient {
-  async gitRoot(cwd: string, signal?: AbortSignal): Promise<string> {
+  async findGitRoot(cwd: string, signal?: AbortSignal): Promise<string | undefined> {
     const child = spawn("git", ["rev-parse", "--show-toplevel"], {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
@@ -30,10 +30,14 @@ export class CbmClient {
         child.on("close", (code) => resolveOutput(code === 0 ? stdout.trim() : ""));
       });
 
-      return output || cwd;
+      return output || undefined;
     } finally {
       signal?.removeEventListener("abort", kill);
     }
+  }
+
+  async gitRoot(cwd: string, signal?: AbortSignal): Promise<string> {
+    return (await this.findGitRoot(cwd, signal)) ?? cwd;
   }
 
   async callTool(toolName: string, args: Record<string, unknown>, options: CbmCallOptions = {}): Promise<CbmCallResult> {

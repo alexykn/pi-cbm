@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { CbmClient } from "../cbm/client.js";
 import { indexTimeoutMs } from "../cbm/timeouts.js";
 import { errorText } from "../shared/strings.js";
+import { validateAutoIndexPath } from "./auto-index-paths.js";
 
 const AUTO_INDEX_MODE = "full";
 
@@ -24,15 +25,32 @@ export type ToolExecutionContext = {
   signal?: AbortSignal;
 };
 
-export type IndexResult = {
-  project: string;
-  nodes?: number;
-  edges?: number;
-  data: Record<string, unknown>;
+export type IndexResult =
+  | {
+      status: "indexed";
+      project: string;
+      nodes?: number;
+      edges?: number;
+      data: Record<string, unknown>;
+    }
+  | {
+      status: "skipped";
+      reason: string;
+    };
+
+export type AutoIndexSettings = {
+  readonly autoIndexNonGitDirectories: boolean;
 };
 
+type AutoIndexTarget =
+  | { ok: true; path: string; source: "git-root" | "cwd" }
+  | { ok: false; reason: string };
+
 export class ProjectService {
-  constructor(private readonly cbm: CbmClient) {}
+  constructor(
+    private readonly cbm: CbmClient,
+    private readonly settings: AutoIndexSettings,
+  ) {}
 
   async gitRoot(cwd: string, signal?: AbortSignal): Promise<string> {
     return this.cbm.gitRoot(cwd, signal);
@@ -76,15 +94,37 @@ export class ProjectService {
     return this.gitRoot(cwd, signal);
   }
 
+  async autoIndexTarget(cwd: string, signal?: AbortSignal): Promise<AutoIndexTarget> {
+    const gitRoot = await this.cbm.findGitRoot(cwd, signal);
+    if (gitRoot) {
+      const validation = validateAutoIndexPath(gitRoot);
+      if (!validation.ok) return validation;
+      return { ok: true, path: validation.path, source: "git-root" };
+    }
+
+    if (!this.settings.autoIndexNonGitDirectories) {
+      return { ok: false, reason: "not inside a git repository and non-git auto-indexing is disabled" };
+    }
+
+    const validation = validateAutoIndexPath(cwd);
+    if (!validation.ok) return validation;
+    return { ok: true, path: validation.path, source: "cwd" };
+  }
+
   async indexCurrentRepo(cwd: string, signal?: AbortSignal): Promise<IndexResult> {
-    const repoPath = await this.defaultRepoPath(cwd, signal);
+    const target = await this.autoIndexTarget(cwd, signal);
+    if (!target.ok) {
+      return { status: "skipped", reason: target.reason };
+    }
+
     const result = await this.cbm.callTool(
       "index_repository",
-      { repo_path: repoPath, mode: AUTO_INDEX_MODE },
+      { repo_path: target.path, mode: AUTO_INDEX_MODE },
       { signal, timeoutMs: indexTimeoutMs(undefined) },
     );
     const data = result.data && typeof result.data === "object" ? (result.data as Record<string, unknown>) : {};
     return {
+      status: "indexed",
       project: typeof data.project === "string" ? data.project : "ready",
       nodes: typeof data.nodes === "number" ? data.nodes : undefined,
       edges: typeof data.edges === "number" ? data.edges : undefined,
