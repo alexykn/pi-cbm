@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json index_status  # stdin: {\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\"}",
+  "args_json": "{\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\"}",
+  "exit_code": 0,
+  "duration_ms": 974,
+  "stderr": ""
+}

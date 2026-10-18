@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json get_graph_schema  # stdin: {\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\"}",
+  "args_json": "{\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\"}",
+  "exit_code": 0,
+  "duration_ms": 2214,
+  "stderr": ""
+}

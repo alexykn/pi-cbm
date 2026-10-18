@@ -353,6 +353,7 @@ export const toolDefinitions: ToolDefinition[] = [
       context: Type.Optional(Type.Number()),
       regex: Type.Optional(Type.Boolean()),
       limit: Type.Optional(Type.Number({ default: 10 })),
+      offset: Type.Optional(Type.Number({ description: "Skip this many grouped results (sent to cbm as `result_offset`); use the pagination_hint offset to fetch the next page." })),
       ...EXPLORATION_OUTPUT_CONTROL_PARAMS,
       timeout_ms: TIMEOUT_MS,
     }),

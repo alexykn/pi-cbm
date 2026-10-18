@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json search_graph  # stdin: {\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"qn_pattern\":\".*client.*CbmClient.*\",\"limit\":5}",
+  "args_json": "{\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"qn_pattern\":\".*client.*CbmClient.*\",\"limit\":5}",
+  "exit_code": 0,
+  "duration_ms": 1965,
+  "stderr": ""
+}

@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
 import { resolveCbmBinary } from "./binary.js";
 import { parseCbmEnvelope, parseMaybeJson } from "./envelope.js";
+import { normalizeCbmData } from "./normalize.js";
 import type { CbmCallOptions, CbmCallResult } from "./result.js";
 import { DEFAULT_QUERY_TIMEOUT_MS } from "./timeouts.js";
+import { checkCbmVersion } from "./version.js";
 import { formatSize } from "../shared/strings.js";
 
 const MAX_STDIO_BYTES = 50 * 1024 * 1024;
@@ -42,12 +44,38 @@ export class CbmClient {
 
   async callTool(toolName: string, args: Record<string, unknown>, options: CbmCallOptions = {}): Promise<CbmCallResult> {
     const binary = await resolveCbmBinary();
+    const version = await checkCbmVersion(binary);
+    if (version.status === "too-old") {
+      throw new Error(version.message ?? `codebase-memory-mcp ${version.version ?? "?"} is unsupported`);
+    }
+
+    // 0.12 ignores `format` on stdin for list_projects, so that one uses the flag and no stdin.
+    // limit/offset are forwarded as flags so callers can page past cbm's default 50; other args stay dropped.
+    const argv = ["cli", "--json", toolName];
+    let stdin: string | undefined;
+    if (toolName === "list_projects") {
+      argv.push("--format", "json");
+      for (const flag of ["limit", "offset"] as const) {
+        const value = args[flag];
+        if (typeof value === "number" && Number.isInteger(value)) argv.push(`--${flag}`, String(value));
+      }
+    } else {
+      stdin = JSON.stringify({ format: "json", ...args });
+    }
+
+    if (options.signal?.aborted) throw new Error(`codebase-memory-mcp ${toolName} cancelled`);
+
     const timeoutMs = options.timeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS;
-    const child = spawn(binary, ["cli", "--json", toolName, JSON.stringify(args)], {
-      stdio: ["ignore", "pipe", "pipe"],
+    const child = spawn(binary, argv, {
+      stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       windowsHide: true,
       env: resolveCbmEnvironment(),
     });
+
+    if (stdin !== undefined) {
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(stdin);
+    }
 
     let stdout = "";
     let stderr = "";
@@ -88,7 +116,7 @@ export class CbmClient {
       }
 
       const { envelope, text } = parseCbmEnvelope(stdout);
-      const data = parseMaybeJson(text);
+      const data = normalizeCbmData(parseMaybeJson(text));
       const ok = envelope.isError !== true;
       if (!ok && !options.allowError) throw new Error(typeof data === "string" ? data : JSON.stringify(data));
 

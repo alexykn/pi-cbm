@@ -1,0 +1,15 @@
+Usage:
+  codebase-memory-mcp cli index_repository --flag value [--flag2 value2 ...]
+  codebase-memory-mcp cli index_repository --args-file <path-to-json>
+  echo '<json>' | codebase-memory-mcp cli index_repository
+  codebase-memory-mcp cli index_repository '<raw-json-args>'
+
+Flags:
+  --repo-path <string> [required]  Repository path
+  --mode <full|moderate|fast|cross-repo-intelligence> [default: full]  full: all+semantic; moderate: filtered+semantic; fast: filtered only; cross-repo-intelligence: link services.
+  --target-projects <array>  Cross-repo targets; ["*"] means all.
+  --name <string>  Name override; Non-ASCII bytes are encoded; unsafe characters normalized.
+  --persistence <boolean> [default: false]  Write .codebase-memory/graph.db.zst.
+  --doc-candidates <boolean>  Doc-code candidates; default: the doc_candidates setting, else on for full, off for moderate/fast.
+  --async <boolean> [default: false]  Start the index in the background and return immediately; it keeps running if this call is cancelled or times out. Not with status or cross-repo-intelligence. Refused for a one-shot cli call that is the only client of a temporary daemon (run daemon start).
+  --status <boolean> [default: false]  Report the running or last index job (queued/running/succeeded/failed/cancelled) instead of indexing. Pass the same repo_path (and name, if any) as the index call.

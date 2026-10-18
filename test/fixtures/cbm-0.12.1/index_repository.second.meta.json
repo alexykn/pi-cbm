@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json index_repository  # stdin: {\"format\":\"json\",\"repo_path\":\"/tmp/cbm-fixture-repo\",\"mode\":\"full\"}",
+  "args_json": "{\"format\":\"json\",\"repo_path\":\"/tmp/cbm-fixture-repo\",\"mode\":\"full\"}",
+  "exit_code": 0,
+  "duration_ms": 1262,
+  "stderr": ""
+}

@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json index_repository  # stdin: {\"format\":\"json\",\"repo_path\":\"/tmp/cbm-fixture-repo\",\"mode\":\"full\"}",
+  "args_json": "{\"format\":\"json\",\"repo_path\":\"/tmp/cbm-fixture-repo\",\"mode\":\"full\"}",
+  "exit_code": 0,
+  "duration_ms": 413,
+  "stderr": "level=info msg=mem.init budget_mb=2485 total_ram_mb=9943\nlevel=info msg=index.supervisor.reap outcome=clean exit_code=0 signal=0\n"
+}

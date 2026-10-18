@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json query_graph  # stdin: {\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"query\":\"MATCH (f:Function) RETURN f.name, f.file_path LIMIT 3\"}",
+  "args_json": "{\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"query\":\"MATCH (f:Function) RETURN f.name, f.file_path LIMIT 3\"}",
+  "exit_code": 0,
+  "duration_ms": 2604,
+  "stderr": ""
+}

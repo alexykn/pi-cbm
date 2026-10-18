@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json search_code  # stdin: {\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"pattern\":\"resolveCbmBinary\",\"context\":2,\"limit\":10}",
+  "args_json": "{\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"pattern\":\"resolveCbmBinary\",\"context\":2,\"limit\":10}",
+  "exit_code": 0,
+  "duration_ms": 2215,
+  "stderr": ""
+}
