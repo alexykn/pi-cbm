@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { resolveCbmBinary } from "./binary.js";
 import { parseCbmEnvelope, parseMaybeJson } from "./envelope.js";
+import { CbmToolError } from "./errors.js";
 import { normalizeCbmData } from "./normalize.js";
 import type { CbmCallOptions, CbmCallResult } from "./result.js";
 import { DEFAULT_QUERY_TIMEOUT_MS } from "./timeouts.js";
@@ -114,7 +115,7 @@ export class CbmClient {
       const { envelope, text } = parseCbmEnvelope(stdout);
       const data = normalizeCbmData(parseMaybeJson(text));
       const ok = envelope.isError !== true;
-      if (!ok && !options.allowError) throw new Error(typeof data === "string" ? data : JSON.stringify(data));
+      if (!ok && !options.allowError) throw new CbmToolError(toolName, data);
 
       return { ok, data, rawText: text, stderr };
     } finally {

@@ -1,9 +1,10 @@
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { CbmClient } from "../cbm/client.js";
+import { CbmToolError } from "../cbm/errors.js";
 import { removeUndefined } from "../shared/object.js";
 import { isAbsolutePath, isWithin, looksLikePath, normalizePathKey } from "../shared/paths.js";
-import { errorTextWithDetails } from "../shared/strings.js";
+import { errorText, errorTextWithDetails } from "../shared/strings.js";
 import type { CbmProject, ProjectCatalog } from "./project-catalog.js";
 
 const MAX_LISTED_PROJECTS = 10;
@@ -17,6 +18,11 @@ export type ToolExecutionContext = {
 };
 
 type ProjectRoot = { project: CbmProject; root: string };
+
+/** A cbm error payload (not a message that happens to embed one) saying the project is unknown. */
+function isProjectError(data: unknown): boolean {
+  return PROJECT_ERROR_PATTERN.test(errorText(data));
+}
 
 /**
  * The name cbm gives a root indexed without `name`: characters outside
@@ -85,8 +91,10 @@ export class ProjectResolver {
    * dropped). Keep cbm's detail but append the same actionable project list.
    */
   async projectLookupError(value: unknown, project: string, ctx: ToolExecutionContext): Promise<Error> {
-    const text = value instanceof Error ? value.message : errorTextWithDetails(value);
-    if (!PROJECT_ERROR_PATTERN.test(text)) return value instanceof Error ? value : new Error(text);
+    if (value instanceof Error && !(value instanceof CbmToolError)) return value;
+    const data = value instanceof CbmToolError ? value.data : value;
+    const text = errorTextWithDetails(data);
+    if (!isProjectError(data)) return value instanceof Error ? value : new Error(text);
     const projects = await this.catalog.list(ctx.signal).catch(() => []);
     const gitRoot = await this.gitRootOrUndefined(ctx.cwd, ctx.signal);
     return new Error(`${text} ${this.projectResolutionMessage(project || undefined, ctx.cwd, gitRoot, projects)}`);
@@ -97,7 +105,7 @@ export class ProjectResolver {
     try {
       return await run();
     } catch (error) {
-      if (!(error instanceof Error) || !PROJECT_ERROR_PATTERN.test(error.message)) throw error;
+      if (!(error instanceof CbmToolError) || !isProjectError(error.data)) throw error;
       throw await this.projectLookupError(error, project, ctx);
     }
   }

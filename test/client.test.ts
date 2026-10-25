@@ -18,6 +18,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 import { CbmClient } from "../src/cbm/client.js";
+import { CbmToolError } from "../src/cbm/errors.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -208,9 +209,9 @@ describe("CbmClient CLI transport", () => {
       isError: true,
     });
 
-    await expect(new CbmClient().callTool("get_code_snippet", { qualified_name: "missing" })).rejects.toThrow(
-      /symbol not found/,
-    );
+    const error = await new CbmClient().callTool("get_code_snippet", { qualified_name: "missing" }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(CbmToolError);
+    expect(error).toMatchObject({ tool: "get_code_snippet", message: expect.stringMatching(/^symbol not found/) });
     expect(calls[0].args).toEqual(["cli", "--json", "get_code_snippet"]);
   });
 });

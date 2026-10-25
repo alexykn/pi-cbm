@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CbmClient } from "../src/cbm/client.js";
+import { CbmToolError } from "../src/cbm/errors.js";
 import type { CbmCallResult } from "../src/cbm/result.js";
 import type { IndexingService } from "../src/domain/indexing.js";
 import { OutputService } from "../src/domain/output.js";
@@ -24,8 +25,12 @@ function queryServiceWith(callTool: (tool: string, args: Record<string, unknown>
   return new QueryService(cbm, new ProjectResolver(cbm, catalog), catalog, {} as IndexingService, new OutputService(), {} as TraceService);
 }
 
-const projectError = () => {
-  throw new Error('{"error":"project not found or not indexed","available_projects":["tmp-cbm-fixture-repo"]}');
+const projectError = (tool: string) => {
+  throw new CbmToolError(tool, {
+    error: "project not found or not indexed",
+    hint: "Run list_projects to see indexed projects.",
+    available_projects: ["tmp-cbm-fixture-repo"],
+  });
 };
 
 describe("QueryService project errors", () => {
@@ -35,6 +40,16 @@ describe("QueryService project errors", () => {
     await expect(service.queryGraph({ project: "repo" }, CTX)).rejects.toThrow(
       /project not found or not indexed.*indexed projects: repo -> \/tmp\/cbm-fixture-repo.*absolute path/,
     );
+  });
+
+  it("shows cbm's error, hint and available projects as text, not raw JSON", async () => {
+    const service = queryServiceWith(projectError);
+
+    let message = "";
+    await service.queryGraph({ project: "repo" }, CTX).catch((error: Error) => (message = error.message));
+
+    expect(message).toMatch(/^project not found or not indexed Run list_projects to see indexed projects\. available_projects: tmp-cbm-fixture-repo No indexed project/);
+    expect(message).not.toContain('{"');
   });
 
   it("rethrows a query-tool project error with the actionable project list", async () => {

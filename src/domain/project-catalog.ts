@@ -1,6 +1,6 @@
 import { CbmClient } from "../cbm/client.js";
+import { CbmToolError } from "../cbm/errors.js";
 import { isAbsolutePath, relativeTo } from "../shared/paths.js";
-import { errorText } from "../shared/strings.js";
 
 /** Keep a missing `root_path` cached briefly so one failed lookup doesn't re-run per node in a batch. */
 const ROOT_PATH_MISS_TTL_MS = 30_000;
@@ -119,7 +119,7 @@ export class ProjectCatalog {
       );
       const data = result.data as ListProjectsData;
       if (!result.ok && data?.error?.includes("cannot read cache directory")) return [];
-      if (!result.ok) throw new Error(errorText(result.data));
+      if (!result.ok) throw new CbmToolError("list_projects", result.data);
       const page = Array.isArray(data.projects) ? data.projects : [];
       projects.push(...page);
       if (data.has_more !== true || page.length === 0) break;
