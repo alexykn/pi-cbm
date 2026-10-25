@@ -91,7 +91,7 @@ Expand-Archive codebase-memory-mcp-windows-amd64.zip -DestinationPath .
 If the binary is not on `PATH`, set:
 
 ```sh
-export CODEBASE_MEMORY_MCP_BIN="$HOME/.local/bin/codebase-memory-mcp"
+export PI_CBM_BIN="$HOME/.local/bin/codebase-memory-mcp"
 ```
 
 ### Supported versions
@@ -143,6 +143,35 @@ Most tools accept optional `project`. When omitted, the extension infers it from
 
 Matching uses the longest indexed root that contains the working directory, so a git worktree or nested checkout that is not indexed itself resolves to the containing repo's graph. Index the worktree separately to query its own graph. When two indexed projects share one root (the default name plus a custom `name`), path and cwd resolution picks the default derived name; pass the custom name explicitly to query that one.
 
+## Settings
+
+pi-cbm reads these environment variables. Blank counts as unset, and an invalid number falls back to the default.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `PI_CBM_BIN` | `codebase-memory-mcp` on `PATH`, then `~/.local/bin/codebase-memory-mcp` | Path to the `codebase-memory-mcp` binary. |
+| `PI_CBM_CACHE_DIR` | `CBM_CACHE_DIR`, else `~/.cache/codebase-memory-mcp` | Cache directory for cbm's databases and pi-cbm's leases, queue and index records. Forwarded to the CLI as `CBM_CACHE_DIR`. |
+| `PI_CBM_MAX_CONCURRENT_INDEXES` | `1` | Machine-wide maximum of simultaneous repository indexers. Raise it only when all Pi sessions share the same cache directory and the machine can support the extra load. |
+| `PI_CBM_AUTO_REFRESH_INTERVAL_MS` | `60000` | How often the background refresh checks the session repo. A check that finds no changes costs a `git ls-files` and one `list_projects` call, not an index. |
+| `PI_CBM_FRESH_INDEX_TIMEOUT_MS` | `30000` | How long `detect_changes` waits for a re-index (lease wait plus the index) before answering from the existing graph. The re-index keeps running in the background. |
+| `PI_CBM_SKIP_VERSION_CHECK` | unset | `1` skips the `--version` probe. |
+
+`CBM_CACHE_DIR` is `codebase-memory-mcp`'s own variable, not a pi-cbm alias. pi-cbm follows it when `PI_CBM_CACHE_DIR` is unset, so its coordination state stays next to the databases the binary writes.
+
+### Breaking changes
+
+The `CBM_*` aliases for pi-cbm's own settings, and the old binary variables, are no longer read. Rename them:
+
+| Removed | Use instead |
+| --- | --- |
+| `CODEBASE_MEMORY_MCP_BIN`, `CBM_BIN` | `PI_CBM_BIN` |
+| `CBM_MAX_CONCURRENT_INDEXES` | `PI_CBM_MAX_CONCURRENT_INDEXES` |
+| `CBM_AUTO_REFRESH_INTERVAL_MS` | `PI_CBM_AUTO_REFRESH_INTERVAL_MS` |
+| `CBM_FRESH_INDEX_TIMEOUT_MS` | `PI_CBM_FRESH_INDEX_TIMEOUT_MS` |
+| `CBM_SKIP_VERSION_CHECK` | `PI_CBM_SKIP_VERSION_CHECK` |
+
+`CBM_CACHE_DIR` keeps working (see above).
+
 ## Index freshness
 
 `codebase-memory-mcp` CLI indexes are not watched, and a full re-index costs the same as the first one (seconds for a small repo, minutes for a large one). pi-cbm therefore re-indexes only when the repo changed since the graph was taken, and it uses one check for both the background refresh and `detect_changes`.
@@ -170,14 +199,6 @@ Open the pi-cbm settings menu:
 - `/cbm disable-non-git` — only auto-index git repositories.
 
 Non-git auto-indexing is disabled by default. Enable it explicitly when working in a non-git project. The unsafe-path guard is always enabled: filesystem roots, home directories, system directories, and common macOS/Linux builtin directories are skipped with a status message explaining why.
-
-Set `PI_CBM_MAX_CONCURRENT_INDEXES` to configure the machine-wide maximum number of simultaneous repository indexers. It defaults to `1`; use a higher value only when all Pi sessions share the same cache directory and the machine can safely support the additional concurrency.
-
-Set `PI_CBM_AUTO_REFRESH_INTERVAL_MS` to override how often the background refresh checks the repo, in milliseconds. It defaults to `60000` (60 seconds). A check that finds no changes costs a `git ls-files` plus one `list_projects` call, not an index. `PI_CBM_CACHE_DIR` optionally overrides the coordination/cache directory and is forwarded to the upstream CLI as `CBM_CACHE_DIR`.
-
-Set `PI_CBM_FRESH_INDEX_TIMEOUT_MS` to bound how long `detect_changes` waits for a re-index (lease wait plus the index itself) before answering from the existing graph. It defaults to `30000` (30 seconds). The re-index is not cancelled when the wait ends; it keeps running in the background.
-
-Every `PI_CBM_*` setting also accepts its `CBM_*` name (`CBM_MAX_CONCURRENT_INDEXES`, `CBM_AUTO_REFRESH_INTERVAL_MS`, `CBM_CACHE_DIR`, `CBM_FRESH_INDEX_TIMEOUT_MS`, `CBM_SKIP_VERSION_CHECK`); the first three remain supported for backwards compatibility. When both names are set, the `PI_CBM_*` value takes precedence. The binary path is read from `CODEBASE_MEMORY_MCP_BIN`, then `CBM_BIN`.
 
 Notes:
 

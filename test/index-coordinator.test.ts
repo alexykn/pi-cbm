@@ -69,7 +69,6 @@ describe("IndexCoordinator", () => {
   });
 
   it("allows the configured number of repositories to index concurrently", async () => {
-    vi.stubEnv("CBM_MAX_CONCURRENT_INDEXES", "1");
     vi.stubEnv("PI_CBM_MAX_CONCURRENT_INDEXES", "2");
     const { cacheDirectory, repo } = await createFixture();
     const secondRepo = join(cacheDirectory, "second-repo");
@@ -199,27 +198,9 @@ describe("IndexCoordinator", () => {
     await result.lease.release();
   });
 
-  it("uses the legacy concurrency environment name", async () => {
-    vi.stubEnv("PI_CBM_MAX_CONCURRENT_INDEXES", "");
-    vi.stubEnv("CBM_MAX_CONCURRENT_INDEXES", "2");
+  it("follows cbm's own CBM_CACHE_DIR when PI_CBM_CACHE_DIR is unset", async () => {
     const { cacheDirectory, repo } = await createFixture();
-    const secondRepo = join(cacheDirectory, "second-repo");
-    await mkdir(secondRepo);
-    const coordinator = new IndexCoordinator({ cacheDirectory, ...FAST_RETRY_OPTIONS });
-
-    const first = await coordinator.acquire(repo);
-    expect(first.ok).toBe(true);
-    if (!first.ok) return;
-
-    const second = await coordinator.acquire(secondRepo);
-    expect(second.ok).toBe(true);
-    await first.lease.release();
-    if (second.ok) await second.lease.release();
-  });
-
-  it("uses the legacy cache directory environment name", async () => {
-    const { cacheDirectory, repo } = await createFixture();
-    const configuredCache = join(cacheDirectory, "legacy-cache");
+    const configuredCache = join(cacheDirectory, "upstream-cache");
     vi.stubEnv("PI_CBM_CACHE_DIR", "");
     vi.stubEnv("CBM_CACHE_DIR", configuredCache);
     const coordinator = new IndexCoordinator(FAST_RETRY_OPTIONS);

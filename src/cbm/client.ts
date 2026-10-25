@@ -139,6 +139,7 @@ export class CbmClient {
 }
 
 function resolveCbmEnvironment(): NodeJS.ProcessEnv | undefined {
+  // Only PI_CBM_CACHE_DIR needs forwarding: a CBM_CACHE_DIR set directly is inherited as is.
   const cacheDirectory = cbmEnv("CACHE_DIR");
   if (!cacheDirectory) return undefined;
   return { ...process.env, CBM_CACHE_DIR: cacheDirectory };

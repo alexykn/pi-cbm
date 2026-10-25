@@ -843,18 +843,19 @@ export class IndexCoordinator {
   }
 }
 
-// These two knobs read process.env inline (same PI_CBM_*-wins rule as shared/env.ts) because the
+// These two knobs read process.env inline rather than through shared/env.ts because the
 // cross-process tests load this file on its own, without its relative imports.
 function resolveCacheDirectory(): string {
-  // PI_CBM_CACHE_DIR is the extension-facing name. Keep following the
-  // upstream CBM_CACHE_DIR when it is set so the coordinator stays beside the
-  // CLI's databases even when the upstream variable is configured directly.
+  // PI_CBM_CACHE_DIR wins. CBM_CACHE_DIR is not a pi-cbm alias but cbm's own
+  // variable, which the binary reads from the inherited environment: without
+  // this fallback the leases and index records would land in ~/.cache while
+  // cbm writes its databases elsewhere.
   const configured = process.env.PI_CBM_CACHE_DIR?.trim() || process.env.CBM_CACHE_DIR?.trim();
   return resolve(configured || join(homedir(), ".cache", "codebase-memory-mcp"));
 }
 
 function resolveMaxConcurrentIndexes(): number {
-  const configured = process.env.PI_CBM_MAX_CONCURRENT_INDEXES?.trim() || process.env.CBM_MAX_CONCURRENT_INDEXES?.trim();
+  const configured = process.env.PI_CBM_MAX_CONCURRENT_INDEXES?.trim();
   if (!configured) return 1;
   const parsed = Number(configured);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;

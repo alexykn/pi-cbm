@@ -108,11 +108,11 @@ describe("CbmClient environment", () => {
       `#!/usr/bin/env node\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(observedPath)}, process.env.CBM_CACHE_DIR ?? "");\nprocess.stdout.write(JSON.stringify({ content: [{ type: "text", text: "{}" }] }));\n`,
     );
     await chmod(binaryPath, 0o755);
-    vi.stubEnv("CODEBASE_MEMORY_MCP_BIN", binaryPath);
+    vi.stubEnv("PI_CBM_BIN", binaryPath);
     vi.stubEnv("PI_CBM_SKIP_VERSION_CHECK", "1");
-    const legacyCache = join(directory, "legacy-cache");
+    const upstreamCache = join(directory, "upstream-cache");
     const configuredCache = join(directory, "configured-cache");
-    vi.stubEnv("CBM_CACHE_DIR", legacyCache);
+    vi.stubEnv("CBM_CACHE_DIR", upstreamCache);
     vi.stubEnv("PI_CBM_CACHE_DIR", configuredCache);
 
     const client = new CbmClient();
@@ -121,14 +121,14 @@ describe("CbmClient environment", () => {
 
     vi.stubEnv("PI_CBM_CACHE_DIR", "");
     await client.callTool("list_projects", {});
-    await expect(readFile(observedPath, "utf8")).resolves.toBe(legacyCache);
+    await expect(readFile(observedPath, "utf8")).resolves.toBe(upstreamCache);
   }, 20_000);
 });
 
 describe("CbmClient CLI transport", () => {
   it("sends tool args on stdin and keeps JSON off argv", async () => {
     const directory = await temporaryDirectory();
-    vi.stubEnv("CODEBASE_MEMORY_MCP_BIN", await fakeBinary(directory));
+    vi.stubEnv("PI_CBM_BIN", await fakeBinary(directory));
     vi.stubEnv("PI_CBM_SKIP_VERSION_CHECK", "1");
     const calls = stubSpawn("{}");
 
@@ -142,7 +142,7 @@ describe("CbmClient CLI transport", () => {
 
   it("lists projects with the --format flag and no stdin", async () => {
     const directory = await temporaryDirectory();
-    vi.stubEnv("CODEBASE_MEMORY_MCP_BIN", await fakeBinary(directory));
+    vi.stubEnv("PI_CBM_BIN", await fakeBinary(directory));
     vi.stubEnv("PI_CBM_SKIP_VERSION_CHECK", "1");
     const calls = stubSpawn("{}");
 
@@ -155,7 +155,7 @@ describe("CbmClient CLI transport", () => {
 
   it("pages list_projects with the flags captured against real cbm 0.12.1", async () => {
     const directory = await temporaryDirectory();
-    vi.stubEnv("CODEBASE_MEMORY_MCP_BIN", await fakeBinary(directory));
+    vi.stubEnv("PI_CBM_BIN", await fakeBinary(directory));
     vi.stubEnv("PI_CBM_SKIP_VERSION_CHECK", "1");
     const calls = stubSpawn("{}");
     const captured = JSON.parse(readFileSync(new URL("./fixtures/cbm-0.12.1/list_projects.paged.meta.json", import.meta.url), "utf8")) as {
@@ -171,7 +171,7 @@ describe("CbmClient CLI transport", () => {
 
   it("keeps a caller-supplied format instead of injecting json", async () => {
     const directory = await temporaryDirectory();
-    vi.stubEnv("CODEBASE_MEMORY_MCP_BIN", await fakeBinary(directory));
+    vi.stubEnv("PI_CBM_BIN", await fakeBinary(directory));
     vi.stubEnv("PI_CBM_SKIP_VERSION_CHECK", "1");
     const calls = stubSpawn("{}");
 
@@ -182,7 +182,7 @@ describe("CbmClient CLI transport", () => {
 
   it("rejects a too-old binary before spawning the tool", async () => {
     const directory = await temporaryDirectory();
-    vi.stubEnv("CODEBASE_MEMORY_MCP_BIN", await fakeBinary(directory));
+    vi.stubEnv("PI_CBM_BIN", await fakeBinary(directory));
     const versionCalls = stubVersionSpawn("codebase-memory-mcp 0.9.0");
 
     await expect(new CbmClient().callTool("search_graph", { name_pattern: "x" })).rejects.toThrow(
@@ -196,7 +196,7 @@ describe("CbmClient CLI transport", () => {
 
   it("rejects a pre-aborted signal without spawning the tool", async () => {
     const directory = await temporaryDirectory();
-    vi.stubEnv("CODEBASE_MEMORY_MCP_BIN", await fakeBinary(directory));
+    vi.stubEnv("PI_CBM_BIN", await fakeBinary(directory));
     vi.stubEnv("PI_CBM_SKIP_VERSION_CHECK", "1");
     const controller = new AbortController();
     controller.abort();
@@ -209,7 +209,7 @@ describe("CbmClient CLI transport", () => {
 
   it("surfaces a 0.12 error envelope that exits non-zero", async () => {
     const directory = await temporaryDirectory();
-    vi.stubEnv("CODEBASE_MEMORY_MCP_BIN", await fakeBinary(directory));
+    vi.stubEnv("PI_CBM_BIN", await fakeBinary(directory));
     vi.stubEnv("PI_CBM_SKIP_VERSION_CHECK", "1");
     const calls = stubSpawn('{"error":"symbol not found. Use search_graph(name_pattern=\\"x\\") first."}', {
       code: 1,

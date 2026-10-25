@@ -37,7 +37,7 @@ function registerHandlers() {
 
 describe("lifecycle cbm version notices", () => {
   it("tells the user once to upgrade a too-old cbm, not on every session", async () => {
-    vi.stubEnv("CODEBASE_MEMORY_MCP_BIN", await binaryReporting("0.9.0"));
+    vi.stubEnv("PI_CBM_BIN", await binaryReporting("0.9.0"));
     const { registerLifecycle } = await import("../src/extension/lifecycle.js");
     const { handlers, pi } = registerHandlers();
     const cbm = new CbmClient();
@@ -69,10 +69,10 @@ describe("lifecycle auto-refresh", () => {
   it.each([
     { primary: undefined, legacy: undefined, expectedInterval: 60_000 },
     { primary: "25", legacy: undefined, expectedInterval: 25 },
-    { primary: undefined, legacy: "35", expectedInterval: 35 },
-    { primary: "25", legacy: "35", expectedInterval: 25 },
-    { primary: "0", legacy: "35", expectedInterval: 60_000 },
-    { primary: "not-a-number", legacy: "35", expectedInterval: 60_000 },
+    // The CBM_* aliases were removed; a leftover one must not take effect.
+    { primary: undefined, legacy: "35", expectedInterval: 60_000 },
+    { primary: "0", legacy: undefined, expectedInterval: 60_000 },
+    { primary: "not-a-number", legacy: undefined, expectedInterval: 60_000 },
   ])("uses $expectedInterval ms for primary=$primary legacy=$legacy", async ({ primary, legacy, expectedInterval }) => {
     vi.useFakeTimers();
     vi.stubEnv("PI_CBM_AUTO_REFRESH_INTERVAL_MS", primary ?? "");

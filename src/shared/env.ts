@@ -1,15 +1,6 @@
-/** The first non-blank value among the environment variables `names`, in order. */
-export function firstEnv(...names: string[]): string | undefined {
-  for (const name of names) {
-    const value = process.env[name]?.trim();
-    if (value) return value;
-  }
-  return undefined;
-}
-
-/** An extension setting: `PI_CBM_<name>` wins over its `CBM_<name>` alias; blank counts as unset. */
+/** An extension setting `PI_CBM_<name>`; blank counts as unset. */
 export function cbmEnv(name: string): string | undefined {
-  return firstEnv(`PI_CBM_${name}`, `CBM_${name}`);
+  return process.env[`PI_CBM_${name}`]?.trim() || undefined;
 }
 
 /** A positive integer setting up to `max`, or `fallback` when it is unset or invalid. */

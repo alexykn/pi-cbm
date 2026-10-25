@@ -65,7 +65,7 @@ async function workspace(files: Record<string, string>, options: { git?: boolean
   const statePath = join(base, "fake-cbm-state.json");
   await writeFile(statePath, JSON.stringify({ projects: [] }));
   await writeFile(`${statePath}.log`, "");
-  vi.stubEnv("CODEBASE_MEMORY_MCP_BIN", FAKE_CBM);
+  vi.stubEnv("PI_CBM_BIN", FAKE_CBM);
   vi.stubEnv("PI_CBM_SKIP_VERSION_CHECK", "1");
   vi.stubEnv("FAKE_CBM_STATE", statePath);
   return { root, cacheDirectory, statePath };
