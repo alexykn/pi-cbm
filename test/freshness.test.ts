@@ -105,6 +105,17 @@ async function waitForIndexStart(ws: Workspace) {
   await vi.waitFor(async () => expect(await indexCalls(ws)).toHaveLength(1), { timeout: 10_000 });
 }
 
+/** Wait for a background index to finish and release its lease, so nothing still writes to the cache dir. */
+async function waitForBackgroundIndex(ws: Workspace) {
+  await vi.waitFor(async () => expect(await finishedIndexes(ws)).toHaveLength(1), { timeout: 10_000 });
+  const probe = new IndexCoordinator({ cacheDirectory: ws.cacheDirectory });
+  await vi.waitFor(async () => {
+    const lease = await probe.acquire(ws.root);
+    if (lease.ok) await lease.lease.release();
+    expect(lease.ok).toBe(true);
+  }, { timeout: 10_000 });
+}
+
 const STALE = [{ name: "repo", indexedAgoMs: 90_000 }];
 const FILES = { "src/a.ts": "export const a = 1;\n", "src/b.ts": "export const b = 1;\n" };
 
@@ -203,7 +214,7 @@ describe("detect_changes index freshness", { timeout: 15_000 }, () => {
     expect(await indexCalls(ws)).toHaveLength(0);
     await other.lease.release();
 
-    await vi.waitFor(async () => expect(await finishedIndexes(ws)).toHaveLength(1), { timeout: 10_000 });
+    await waitForBackgroundIndex(ws);
   });
 
   it("stops a cancelled caller's wait without stopping the running index", async () => {
@@ -217,7 +228,7 @@ describe("detect_changes index freshness", { timeout: 15_000 }, () => {
     controller.abort();
     await expect(answer).rejects.toThrow(/cancelled/);
     await releaseIndexes(ws);
-    await vi.waitFor(async () => expect(await finishedIndexes(ws)).toHaveLength(1), { timeout: 10_000 });
+    await waitForBackgroundIndex(ws);
   });
 
   it("lets a call made during another call's refresh wait on that same re-index", async () => {
