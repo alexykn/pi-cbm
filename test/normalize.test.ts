@@ -1,8 +1,11 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { parseCbmEnvelope, parseMaybeJson } from "../src/cbm/envelope.js";
 import { normalizeCbmData } from "../src/cbm/normalize.js";
 
 type JsonObject = Record<string, any>;
+
+const FIXTURE_DIR = new URL("./fixtures/cbm-0.12.1/", import.meta.url);
 
 function fixture(name: string): JsonObject {
   const envelope = JSON.parse(readFileSync(new URL(`./fixtures/cbm-0.12.1/${name}.json`, import.meta.url), "utf8")) as {
@@ -93,12 +96,17 @@ describe("normalizeCbmData", () => {
     expect(labels.find((entry) => entry.label === "Function")?.count).toBe(130);
   });
 
-  it("leaves detect_changes object arrays untouched", () => {
+  it("aliases detect_changes impacted rows like table rows", () => {
     const data = normalize("detect_changes.dirty");
     expect(data.changed_files).toEqual(["src/shared/strings.ts"]);
     const impacted = data.impacted as JsonObject[];
-    expect(impacted[0].qn).toBe("tmp-cbm-fixture-repo.src.domain.auto-index-paths.validateAutoIndexPath");
-    expect(impacted[0].hop).toBe(1);
+    expect(impacted[0]).toMatchObject({
+      qn: "tmp-cbm-fixture-repo.src.domain.auto-index-paths.validateAutoIndexPath",
+      qualified_name: "tmp-cbm-fixture-repo.src.domain.auto-index-paths.validateAutoIndexPath",
+      file: "src/domain/auto-index-paths.ts",
+      file_path: "src/domain/auto-index-paths.ts",
+      hop: 1,
+    });
   });
 
   it("uses the bare name for an empty qn_prefix group", () => {
@@ -123,6 +131,31 @@ describe("normalizeCbmData", () => {
   it("keeps meta for an empty groups page", () => {
     const data = normalizeCbmData({ qn_rule: "qn", cols: ["name"], groups: [], total: 0, has_more: false }) as JsonObject;
     expect(data).toEqual({ qn_rule: "qn", total: 0, has_more: false, results: [] });
+  });
+
+  it("leaves no compact cols/groups table in any captured 0.12.1 envelope", () => {
+    const tables: string[] = [];
+    const visit = (value: unknown, path: string): void => {
+      if (Array.isArray(value)) return value.forEach((item, index) => visit(item, `${path}[${index}]`));
+      if (typeof value !== "object" || value === null) return;
+      if ("cols" in value || "groups" in value) tables.push(path);
+      for (const [key, entry] of Object.entries(value)) visit(entry, `${path}.${key}`);
+    };
+
+    let envelopes = 0;
+    for (const file of readdirSync(FIXTURE_DIR).filter((name) => name.endsWith(".json") && !name.endsWith(".meta.json"))) {
+      let text: string;
+      try {
+        text = parseCbmEnvelope(readFileSync(new URL(file, FIXTURE_DIR), "utf8")).text;
+      } catch {
+        continue; // --version / --help output is not an envelope.
+      }
+      envelopes += 1;
+      visit(normalizeCbmData(parseMaybeJson(text)), file);
+    }
+
+    expect(envelopes).toBeGreaterThan(20);
+    expect(tables).toEqual([]);
   });
 
   it("does not copy null aliases", () => {

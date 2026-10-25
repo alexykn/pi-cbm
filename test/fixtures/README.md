@@ -119,6 +119,7 @@ compact tables reach domain consumers as object arrays:
 - `get_architecture` `node_labels`/`edge_types`/`languages`/`packages`/`entry_points`:
   bare arrays; a `{cols, rows}` table with no sibling keys always collapses to an array.
 - `query_graph` `{columns, rows}`: untouched (still consumed by `coerceQueryGraphMetrics`).
+- `detect_changes` `impacted[]`: already object rows, but with table keys, so they get the same aliases as expanded rows.
 - Expanded rows get aliases: `qn`->`qualified_name`, `file`->`file_path` (both kept),
   `lines` "a-b" -> numeric `start_line`/`end_line`, `in`/`out` -> `in_degree`/`out_degree`,
   `matches` -> `match_lines`. `null` source cells are not aliased.

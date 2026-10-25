@@ -87,12 +87,13 @@ export class QueryService {
     const result = await this.resolver.withProjectError(project, ctx, () =>
       this.cbm.callTool(toolName, args, { signal: ctx.signal, timeoutMs: queryTimeoutMs(params.timeout_ms) }),
     );
-    const data = project && (toolName === "search_graph" || toolName === "get_architecture" || toolName === "detect_changes")
+    // detect_changes is not enriched: its impacted rows carry file + hop, and one snippet call per row would add seconds.
+    const data = project && (toolName === "search_graph" || toolName === "get_architecture")
       ? await this.trace.enrichTraceLocations(result.data, project, params, ctx)
       : project && isRecord(result.data)
         ? await this.catalog.relativizePaths(result.data, project, ctx.signal)
         : result.data;
-    const outputData = freshness ? withIndexFreshness(data as CbmData, freshness) : data;
+    const outputData = freshness ? withIndexFreshness(data, freshness) : data;
     return this.output.buildCompactableToolResult(title, outputData, params, { tool: toolName, args, stderr: result.stderr });
   }
 
@@ -101,7 +102,7 @@ export class QueryService {
     const result = await this.resolver.withProjectError(String(args.project ?? ""), ctx, () =>
       this.cbm.callTool("query_graph", args, { signal: ctx.signal, timeoutMs: queryTimeoutMs(params.timeout_ms) }),
     );
-    return this.output.buildCompactableToolResult("Cypher query results", coerceQueryGraphMetrics(result.data as CbmData), params, {
+    return this.output.buildCompactableToolResult("Cypher query results", coerceQueryGraphMetrics(result.data), params, {
       tool: "query_graph",
       args,
       stderr: result.stderr,

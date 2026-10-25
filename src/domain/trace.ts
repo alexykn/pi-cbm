@@ -103,7 +103,7 @@ export class TraceService {
     );
   }
 
-  async enrichTraceLocations(data: unknown, project: string, params: Record<string, unknown>, ctx: ToolExecutionContext): Promise<CbmData> {
+  async enrichTraceLocations(data: CbmData, project: string, params: Record<string, unknown>, ctx: ToolExecutionContext): Promise<CbmData> {
     const cache = new Map<string, Promise<Partial<SearchCandidate>>>();
     const pending = new Map<string, SearchCandidate>();
 
@@ -138,7 +138,7 @@ export class TraceService {
       return clone;
     };
 
-    const enriched = apply(data as CbmData);
+    const enriched = apply(data);
     const unlocated = pending.size - names.length;
     if (unlocated > 0 && isRecord(enriched)) {
       return {
