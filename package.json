@@ -29,13 +29,13 @@
     "prepack": "npm run check"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.75.5",
-    "@earendil-works/pi-coding-agent": "^0.75.5",
-    "@earendil-works/pi-tui": "^0.75.5",
-    "@types/node": "^25.9.1",
-    "typebox": "^1.1.38",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+    "@earendil-works/pi-ai": "^1.4.0",
+    "@earendil-works/pi-coding-agent": "^1.4.0",
+    "@earendil-works/pi-tui": "^1.4.0",
+    "@types/node": "^26.6.5",
+    "typebox": "^1.4.3",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

@@ -4,10 +4,12 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndexCoordinator } from "../src/domain/index-coordinator.js";
 import { ProjectService } from "../src/domain/project.js";
+
+// Workers import the TypeScript source directly; Node strips the types.
+const COORDINATOR_MODULE_PATH = fileURLToPath(new URL("../src/domain/index-coordinator.ts", import.meta.url));
 
 const FAST_RETRY_OPTIONS = {
   retryRanges: [[1, 1] as const] as const,
@@ -288,7 +290,7 @@ describe("IndexCoordinator", () => {
     await mkdir(eventDirectory);
 
     const workerPath = fileURLToPath(new URL("./fixtures/coordinator-worker.mjs", import.meta.url));
-    const modulePath = await compileCoordinatorModule();
+    const modulePath = COORDINATOR_MODULE_PATH;
     await Promise.all([
       runWorker(workerPath, modulePath, cacheDirectory, repo, eventDirectory, "a"),
       runWorker(workerPath, modulePath, cacheDirectory, repo, eventDirectory, "b"),
@@ -322,7 +324,7 @@ describe("IndexCoordinator", () => {
     await Promise.all([mkdir(secondRepo), mkdir(thirdRepo), mkdir(eventDirectory)]);
 
     const workerPath = fileURLToPath(new URL("./fixtures/coordinator-worker.mjs", import.meta.url));
-    const modulePath = await compileCoordinatorModule();
+    const modulePath = COORDINATOR_MODULE_PATH;
     const workers = [
       runWorker(workerPath, modulePath, cacheDirectory, repo, eventDirectory, "a"),
       runWorker(workerPath, modulePath, cacheDirectory, secondRepo, eventDirectory, "b"),
@@ -478,7 +480,7 @@ describe("IndexCoordinator", () => {
     const eventDirectory = join(cacheDirectory, "events");
     await mkdir(eventDirectory);
     const workerPath = fileURLToPath(new URL("./fixtures/coordinator-signal-worker.mjs", import.meta.url));
-    const modulePath = await compileCoordinatorModule();
+    const modulePath = COORDINATOR_MODULE_PATH;
     const child = spawn(process.execPath, [workerPath, modulePath, cacheDirectory, repo, eventDirectory], {
       stdio: ["ignore", "ignore", "pipe"],
     });
@@ -505,7 +507,7 @@ describe("IndexCoordinator", () => {
     const eventDirectory = join(cacheDirectory, "events");
     await mkdir(eventDirectory);
     const workerPath = fileURLToPath(new URL("./fixtures/coordinator-signal-worker.mjs", import.meta.url));
-    const modulePath = await compileCoordinatorModule();
+    const modulePath = COORDINATOR_MODULE_PATH;
     const child = spawn(process.execPath, [workerPath, modulePath, cacheDirectory, repo, eventDirectory], {
       stdio: ["ignore", "ignore", "pipe"],
     });
@@ -663,22 +665,6 @@ function waitForChild(child: ReturnType<typeof spawn>): Promise<{ code: number |
     child.once("error", rejectChild);
     child.once("close", (code, signal) => resolveChild({ code, signal }));
   });
-}
-
-async function compileCoordinatorModule(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "pi-cbm-module-"));
-  temporaryDirectories.push(directory);
-  const sourcePath = fileURLToPath(new URL("../src/domain/index-coordinator.ts", import.meta.url));
-  const source = await readFile(sourcePath, "utf8");
-  const output = transpileModule(source, {
-    compilerOptions: {
-      target: ScriptTarget.ES2022,
-      module: ModuleKind.ES2022,
-    },
-  }).outputText;
-  const modulePath = join(directory, "index-coordinator.mjs");
-  await writeFile(modulePath, output, "utf8");
-  return modulePath;
 }
 
 function runWorker(
