@@ -837,6 +837,11 @@ export class IndexCoordinator {
     return lock;
   }
 
+  /** Wait this coordinator's jittered backoff for retry `attempt` (0-based); false when `signal` aborted first. */
+  waitToRetry(attempt: number, signal: AbortSignal | undefined): Promise<boolean> {
+    return waitForRetry(this.retryDelay(attempt), signal);
+  }
+
   private retryDelay(attempt: number): number {
     const [minimum, maximum] = this.retryRanges[Math.min(attempt, this.retryRanges.length - 1)] ?? [1_000, 2_000];
     return minimum + Math.floor(this.random() * (maximum - minimum + 1));

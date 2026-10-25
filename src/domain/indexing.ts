@@ -7,13 +7,12 @@ import { cbmEnvPositiveInt } from "../shared/env.js";
 import { isRecord, removeUndefined } from "../shared/object.js";
 import { normalizePathKey } from "../shared/paths.js";
 import { validateAutoIndexPath } from "./auto-index-paths.js";
-import { INDEX_LEASE_HELD_REASON, waitForRetry, type IndexCoordinator, type IndexLease, type IndexRecord } from "./index-coordinator.js";
+import { INDEX_LEASE_HELD_REASON, type IndexCoordinator, type IndexLease, type IndexRecord } from "./index-coordinator.js";
 import type { ProjectCatalog } from "./project-catalog.js";
 import type { ToolExecutionContext } from "./project-resolver.js";
 import { CHANGE_SLACK_MS, isUnchangedSince, newestChangeMs } from "./worktree-changes.js";
 
 const AUTO_INDEX_MODE = "full";
-const LEASE_WAIT_RETRY_MS = 500;
 const DETECT_CHANGES_CANCELLED = "codebase-memory-mcp detect_changes cancelled";
 
 /** How long `detect_changes` waits for the lease plus the re-index before answering from the existing graph. */
@@ -302,14 +301,12 @@ export class IndexingService {
     const waiting = new AbortController();
     const giveUp = setTimeout(() => waiting.abort(), indexTimeoutMs(undefined));
     giveUp.unref?.();
-    let waited = false;
     try {
-      for (;;) {
+      for (let attempt = 0; ; attempt++) {
         const coordination = await this.indexCoordinator.acquire(root, waiting.signal);
-        if (coordination.ok) return { ok: true, lease: coordination.lease, waited };
+        if (coordination.ok) return { ok: true, lease: coordination.lease, waited: attempt > 0 };
         if (coordination.reason !== INDEX_LEASE_HELD_REASON) return coordination;
-        waited = true;
-        if (!(await waitForRetry(LEASE_WAIT_RETRY_MS, waiting.signal))) return { ok: false, reason: "gave up waiting for another index" };
+        if (!(await this.indexCoordinator.waitToRetry(attempt, waiting.signal))) return { ok: false, reason: "gave up waiting for another index" };
       }
     } finally {
       clearTimeout(giveUp);
