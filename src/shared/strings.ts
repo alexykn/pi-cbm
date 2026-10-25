@@ -22,6 +22,11 @@ export function errorText(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/** A thrown Error's message, or undefined when it is not an Error or has none. */
+export function errorMessage(error: unknown): string | undefined {
+  return error instanceof Error && error.message ? error.message : undefined;
+}
+
 /** Like `errorText`, but keeps cbm's `hint`/`available_projects` context for user-facing throws. */
 export function errorTextWithDetails(value: unknown): string {
   const text = errorText(value);

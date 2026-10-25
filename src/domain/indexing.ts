@@ -6,6 +6,7 @@ import { awaitWithSignal } from "../shared/concurrency.js";
 import { cbmEnvPositiveInt } from "../shared/env.js";
 import { isRecord, removeUndefined } from "../shared/object.js";
 import { normalizePathKey } from "../shared/paths.js";
+import { errorMessage } from "../shared/strings.js";
 import { validateAutoIndexPath } from "./auto-index-paths.js";
 import { INDEX_LEASE_HELD_REASON, type IndexCoordinator, type IndexLease, type IndexRecord } from "./index-coordinator.js";
 import type { ProjectCatalog } from "./project-catalog.js";
@@ -64,10 +65,6 @@ type Refresh = { progress: RefreshProgress; result: Promise<IndexFreshness> };
 type RefreshLease = { ok: true; lease: IndexLease; waited: boolean } | { ok: false; reason: string };
 
 const isoSeconds = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
 
 function missingChanges(reference: number | undefined): string {
   return reference === undefined ? "the graph's age is unknown" : `changes after ${isoSeconds(reference)} may be missing`;
@@ -288,7 +285,7 @@ export class IndexingService {
         await acquired.lease.release();
       }
     } catch (error) {
-      return stale(`index refresh failed: ${errorMessage(error, "index failed")}`);
+      return stale(`index refresh failed: ${errorMessage(error) ?? "index failed"}`);
     }
   }
 

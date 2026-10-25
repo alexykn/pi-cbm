@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { CbmServices } from "../pi-tools/definitions.js";
 import { cbmEnvPositiveInt, removedEnvWarning } from "../shared/env.js";
+import { errorMessage } from "../shared/strings.js";
 import { CODEBASE_MEMORY_PROMPT } from "./prompt.js";
 
 const DEFAULT_AUTO_REFRESH_INTERVAL_MS = 60_000;
@@ -80,7 +81,8 @@ export function registerLifecycle(pi: ExtensionAPI, services: CbmServices) {
       session.ui.setStatus("codebase-memory", `cbm ${result.project}${nodes}${edges}`);
     } catch (error) {
       if (generation !== sessionGeneration) return;
-      const reason = error instanceof Error && error.message ? `: ${error.message}` : "";
+      const message = errorMessage(error);
+      const reason = message ? `: ${message}` : "";
       session.ui.setStatus("codebase-memory", `cbm index failed${reason}`);
     } finally {
       if (inFlightGeneration === generation) inFlightGeneration = undefined;
