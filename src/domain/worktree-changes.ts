@@ -20,7 +20,9 @@ export function isUnchangedSince(newestChangeMs: number, referenceMs: number): b
 /** Paths git would show under `root`, relative to it: tracked plus untracked files that are not ignored. */
 function listFiles(root: string, signal?: AbortSignal): Promise<string[] | undefined> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn("git", ["--no-optional-locks", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+    // core.excludesFile is cleared: cbm honours .gitignore and info/exclude but not a configured global excludes
+    // file, so files only that file hides are still in the graph and their edits must count.
+    const child = spawn("git", ["--no-optional-locks", "-c", "core.excludesFile=", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
       stdio: ["ignore", "pipe", "ignore"],
       windowsHide: true,
     });

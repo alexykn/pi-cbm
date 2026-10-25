@@ -260,6 +260,22 @@ describe("detect_changes index freshness", { timeout: 15_000 }, () => {
     expect(await indexCalls(ws)).toHaveLength(2);
   });
 
+  it("re-indexes after editing a file that only the global git excludes file hides", async () => {
+    const ws = await workspace(FILES);
+    // Untracked, created after the initial commit and older than the graph. cbm indexes it.
+    await mkdir(join(ws.root, "scratch"));
+    await writeFile(join(ws.root, "scratch/x.ts"), "export const x = 1;\n");
+    await backdate(ws.root, 60_000);
+    const base = dirname(ws.root);
+    await writeFile(join(base, "global-ignore"), "scratch/\n");
+    await writeFile(join(base, "gitconfig"), `[core]\n\texcludesFile = ${join(base, "global-ignore")}\n`);
+    vi.stubEnv("GIT_CONFIG_GLOBAL", join(base, "gitconfig"));
+    await knownProjects(ws, [{ name: "repo", indexedAgoMs: 30_000 }]);
+    await writeFile(join(ws.root, "scratch/x.ts"), "export const x = 2;\n");
+
+    expect(await detectChanges(session(ws), ws)).toMatch(/^fresh: re-indexed/);
+  });
+
   it("trusts a later index by another client over pi-cbm's own record", async () => {
     const ws = await workspace(FILES);
     await knownProjects(ws, STALE);
