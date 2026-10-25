@@ -1,18 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { CbmServices } from "../pi-tools/definitions.js";
+import { cbmEnvPositiveInt } from "../shared/env.js";
 import { CODEBASE_MEMORY_PROMPT } from "./prompt.js";
 
 const DEFAULT_AUTO_REFRESH_INTERVAL_MS = 60_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
-const AUTO_REFRESH_INTERVAL_MS = resolveAutoRefreshIntervalMs();
-
-function resolveAutoRefreshIntervalMs(): number {
-  const configured = process.env.PI_CBM_AUTO_REFRESH_INTERVAL_MS?.trim() || process.env.CBM_AUTO_REFRESH_INTERVAL_MS?.trim();
-  if (!configured) return DEFAULT_AUTO_REFRESH_INTERVAL_MS;
-
-  const parsed = Number(configured);
-  return Number.isInteger(parsed) && parsed > 0 && parsed <= MAX_TIMER_DELAY_MS ? parsed : DEFAULT_AUTO_REFRESH_INTERVAL_MS;
-}
+const AUTO_REFRESH_INTERVAL_MS = cbmEnvPositiveInt("AUTO_REFRESH_INTERVAL_MS", DEFAULT_AUTO_REFRESH_INTERVAL_MS, MAX_TIMER_DELAY_MS);
 
 type SessionResources = Pick<ExtensionContext, "cwd" | "signal" | "ui">;
 

@@ -6,6 +6,7 @@ import { normalizeCbmData } from "./normalize.js";
 import type { CbmCallOptions, CbmCallResult } from "./result.js";
 import { DEFAULT_QUERY_TIMEOUT_MS } from "./timeouts.js";
 import { CbmVersionGate, type CbmVersionCheck, type CbmVersionNotice } from "./version.js";
+import { cbmEnv } from "../shared/env.js";
 import { formatSize } from "../shared/strings.js";
 
 const MAX_STDIO_BYTES = 50 * 1024 * 1024;
@@ -138,7 +139,7 @@ export class CbmClient {
 }
 
 function resolveCbmEnvironment(): NodeJS.ProcessEnv | undefined {
-  const cacheDirectory = process.env.PI_CBM_CACHE_DIR?.trim() || process.env.CBM_CACHE_DIR?.trim();
+  const cacheDirectory = cbmEnv("CACHE_DIR");
   if (!cacheDirectory) return undefined;
   return { ...process.env, CBM_CACHE_DIR: cacheDirectory };
 }

@@ -162,7 +162,7 @@ Set `PI_CBM_AUTO_REFRESH_INTERVAL_MS` to override the background refresh interva
 
 Set `PI_CBM_FRESH_INDEX_TIMEOUT_MS` to bound how long a tool waits for a stale index to be refreshed before answering from the existing graph. `detect_changes` also re-indexes before diffing; keep this timeout small on large repositories so a first call after a long pause does not block for minutes.
 
-The legacy `CBM_MAX_CONCURRENT_INDEXES`, `CBM_AUTO_REFRESH_INTERVAL_MS`, and `CBM_CACHE_DIR` names remain supported for backwards compatibility. When both names are set, the `PI_CBM_*` value takes precedence.
+Every `PI_CBM_*` setting also accepts its `CBM_*` name (`CBM_MAX_CONCURRENT_INDEXES`, `CBM_AUTO_REFRESH_INTERVAL_MS`, `CBM_CACHE_DIR`, `CBM_FRESH_INDEX_TIMEOUT_MS`, `CBM_SKIP_VERSION_CHECK`); the first three remain supported for backwards compatibility. When both names are set, the `PI_CBM_*` value takes precedence. The binary path is read from `CODEBASE_MEMORY_MCP_BIN`, then `CBM_BIN`.
 
 Notes:
 

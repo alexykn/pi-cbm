@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { awaitWithSignal } from "../shared/concurrency.js";
+import { cbmEnvFlag } from "../shared/env.js";
 
 /** Range this extension is tested against. */
 export const SUPPORTED_CBM_VERSION_RANGE = ">=0.12.0 <0.13.0";
@@ -63,7 +64,7 @@ export class CbmVersionGate {
   private pending: CbmVersionNotice[] = [];
 
   check(binaryPath: string, signal?: AbortSignal): Promise<CbmVersionCheck> {
-    if (process.env.PI_CBM_SKIP_VERSION_CHECK === "1") return Promise.resolve({ status: "ok" });
+    if (cbmEnvFlag("SKIP_VERSION_CHECK")) return Promise.resolve({ status: "ok" });
 
     const cached = this.probes.get(binaryPath);
     if (cached && (cached.expiresAt === undefined || Date.now() < cached.expiresAt)) {

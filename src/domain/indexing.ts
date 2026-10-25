@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { CbmClient } from "../cbm/client.js";
 import { indexTimeoutMs } from "../cbm/timeouts.js";
+import { cbmEnvPositiveInt } from "../shared/env.js";
 import { normalizePathKey } from "../shared/paths.js";
 import { validateAutoIndexPath } from "./auto-index-paths.js";
 import { INDEX_LEASE_HELD_REASON, type IndexCoordinator, type IndexLeaseResult } from "./index-coordinator.js";
@@ -18,10 +19,7 @@ const LEASE_WAIT_RETRY_MS = 500;
 const DEFAULT_FRESH_INDEX_TIMEOUT_MS = 30_000;
 
 function resolveFreshIndexTimeoutMs(): number {
-  const configured = process.env.PI_CBM_FRESH_INDEX_TIMEOUT_MS?.trim();
-  if (!configured) return DEFAULT_FRESH_INDEX_TIMEOUT_MS;
-  const parsed = Number(configured);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_FRESH_INDEX_TIMEOUT_MS;
+  return cbmEnvPositiveInt("FRESH_INDEX_TIMEOUT_MS", DEFAULT_FRESH_INDEX_TIMEOUT_MS);
 }
 
 export type IndexResult =

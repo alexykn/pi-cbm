@@ -155,8 +155,8 @@ describe("cbm version gate", () => {
     expect(spawnControl.spy).toHaveBeenCalledTimes(1);
   });
 
-  it("bypasses the probe when PI_CBM_SKIP_VERSION_CHECK=1", async () => {
-    vi.stubEnv("PI_CBM_SKIP_VERSION_CHECK", "1");
+  it.each(["PI_CBM_SKIP_VERSION_CHECK", "CBM_SKIP_VERSION_CHECK"])("bypasses the probe when %s=1", async (name) => {
+    vi.stubEnv(name, "1");
 
     await expect(new CbmVersionGate().check("/tmp/pi-cbm-version-skip")).resolves.toEqual({ status: "ok" });
     expect(spawnControl.spy).not.toHaveBeenCalled();

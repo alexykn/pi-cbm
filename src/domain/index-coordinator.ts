@@ -801,6 +801,8 @@ export class IndexCoordinator {
   }
 }
 
+// These two knobs read process.env inline (same PI_CBM_*-wins rule as shared/env.ts) because the
+// cross-process tests load this file on its own, without its relative imports.
 function resolveCacheDirectory(): string {
   // PI_CBM_CACHE_DIR is the extension-facing name. Keep following the
   // upstream CBM_CACHE_DIR when it is set so the coordinator stays beside the

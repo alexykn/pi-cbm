@@ -1,6 +1,7 @@
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
+import { firstEnv } from "../shared/env.js";
 
 const DEFAULT_BINARY = "codebase-memory-mcp";
 const FALLBACK_BINARY_PATHS = ["~/.local/bin/codebase-memory-mcp"];
@@ -30,7 +31,7 @@ async function findOnPath(command: string): Promise<string | undefined> {
 }
 
 export async function resolveCbmBinary(): Promise<string> {
-  const configured = process.env.CODEBASE_MEMORY_MCP_BIN?.trim() || process.env.CBM_BIN?.trim();
+  const configured = firstEnv("CODEBASE_MEMORY_MCP_BIN", "CBM_BIN");
   if (configured) {
     const path = expandHome(configured);
     if (await existsExecutable(path)) return path;
