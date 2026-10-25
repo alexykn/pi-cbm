@@ -18,6 +18,38 @@ export type ToolExecutionContext = {
 
 type ProjectRoot = { project: CbmProject; root: string };
 
+/**
+ * The name cbm gives a root indexed without `name`: characters outside
+ * [A-Za-z0-9._-] become "-", runs collapse, and leading/trailing separators drop
+ * (`/tmp/cbm-fixture-repo` -> `tmp-cbm-fixture-repo`).
+ */
+function derivedProjectName(rootPath: string): string {
+  const name = rootPath
+    .replaceAll("\\", "/")
+    .replace(/[^A-Za-z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/\.+/g, ".")
+    .replace(/^[-.]+/, "")
+    .replace(/-+$/, "");
+  return name || "root";
+}
+
+function isDerivedName(project: CbmProject): boolean {
+  return project.root_path !== undefined && project.name === derivedProjectName(project.root_path);
+}
+
+/**
+ * Deepest root first. Two projects can share one root (indexed by default and
+ * again with `name`); prefer cbm's derived name there, then the first by name.
+ */
+function compareRoots(a: ProjectRoot, b: ProjectRoot): number {
+  return (
+    normalizePathKey(b.root).length - normalizePathKey(a.root).length ||
+    Number(isDerivedName(b.project)) - Number(isDerivedName(a.project)) ||
+    a.project.name.localeCompare(b.project.name)
+  );
+}
+
 /** Turns a tool's optional `project` (name, path, or nothing) into an indexed project name. */
 export class ProjectResolver {
   constructor(
@@ -110,9 +142,7 @@ export class ProjectResolver {
   }
 
   private longestPrefix(roots: ProjectRoot[], paths: string[]): CbmProject | undefined {
-    return roots
-      .filter(({ root }) => paths.some((path) => isWithin(root, path)))
-      .sort((a, b) => normalizePathKey(b.root).length - normalizePathKey(a.root).length)[0]?.project;
+    return roots.filter(({ root }) => paths.some((path) => isWithin(root, path))).sort(compareRoots)[0]?.project;
   }
 
   private projectResolutionMessage(given: string | undefined, cwd: string, gitRoot: string | undefined, projects: CbmProject[]): string {

@@ -67,6 +67,21 @@ describe("project resolution", () => {
     await expect(resolver.resolveProject(undefined, "/work/repo/src")).resolves.toBe("inner");
   });
 
+  it("prefers cbm's derived name when a custom-named project shares the same root", async () => {
+    // cbm 0.12 lists both after indexing a root by default and again with `name`; "custom-x" sorts first.
+    const { resolver } = serviceWith({
+      list: () =>
+        okPage([
+          { name: "custom-x", root_path: "/work/my.repo_x" },
+          { name: "work-my.repo_x", root_path: "/work/my.repo_x" },
+        ]),
+    });
+
+    await expect(resolver.resolveProject(undefined, "/work/my.repo_x/src")).resolves.toBe("work-my.repo_x");
+    await expect(resolver.resolveProject("/work/my.repo_x", "/home/user")).resolves.toBe("work-my.repo_x");
+    await expect(resolver.resolveProject("custom-x", "/home/user")).resolves.toBe("custom-x");
+  });
+
   it("fails loudly with the indexed projects when the cwd matches nothing", async () => {
     const { resolver } = serviceWith({ list: () => okPage([{ name: "other", root_path: "/work/other" }]) });
 
