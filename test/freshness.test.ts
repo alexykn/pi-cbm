@@ -195,19 +195,15 @@ describe("detect_changes index freshness", { timeout: 15_000 }, () => {
     vi.stubEnv("PI_CBM_FRESH_INDEX_TIMEOUT_MS", "500");
     const ws = await workspace(FILES);
     await knownProjects(ws, STALE);
-    await holdIndexes(ws);
+    // Another session holds the repo lease, so the refresh cannot start before the timeout.
+    const other = await new IndexCoordinator({ cacheDirectory: ws.cacheDirectory }).acquire(ws.root);
+    if (!other.ok) throw new Error(other.reason);
 
-    expect(await detectChanges(session(ws), ws)).toMatch(/^stale: re-index running since .+; changes after .+ may be missing/);
-    expect(await finishedIndexes(ws)).toHaveLength(0);
-    await releaseIndexes(ws);
+    expect(await detectChanges(session(ws), ws)).toMatch(/^stale: re-index queued since .+; changes after .+ may be missing/);
+    expect(await indexCalls(ws)).toHaveLength(0);
+    await other.lease.release();
 
-    const probe = new IndexCoordinator({ cacheDirectory: ws.cacheDirectory });
-    await vi.waitFor(async () => {
-      const lease = await probe.acquire(ws.root);
-      if (lease.ok) await lease.lease.release();
-      expect(lease.ok).toBe(true);
-    }, { timeout: 10_000 });
-    expect(await finishedIndexes(ws)).toHaveLength(1);
+    await vi.waitFor(async () => expect(await finishedIndexes(ws)).toHaveLength(1), { timeout: 10_000 });
   });
 
   it("stops a cancelled caller's wait without stopping the running index", async () => {
@@ -225,20 +221,20 @@ describe("detect_changes index freshness", { timeout: 15_000 }, () => {
   });
 
   it("lets a call made during another call's refresh wait on that same re-index", async () => {
-    vi.stubEnv("PI_CBM_FRESH_INDEX_TIMEOUT_MS", "500");
     const ws = await workspace(FILES);
     await knownProjects(ws, STALE);
     const s = session(ws);
     await holdIndexes(ws);
     const first = detectChanges(s, ws);
     await waitForIndexStart(ws);
-    // Both time out while the index is held; a call with its own refresh would report that one as queued.
-    const second = await detectChanges(s, ws);
-
-    expect(second).toMatch(/^stale: re-index running since/);
-    expect(second).toBe(await first);
+    // The index is held, so the second call times out: on the running shared re-index, or, had it
+    // started its own refresh, on one still queued behind the first one's lease.
+    vi.stubEnv("PI_CBM_FRESH_INDEX_TIMEOUT_MS", "500");
+    expect(await detectChanges(s, ws)).toMatch(/^stale: re-index running since .+; changes after .+ may be missing/);
+    expect(await finishedIndexes(ws)).toHaveLength(0);
     await releaseIndexes(ws);
-    await vi.waitFor(async () => expect(await finishedIndexes(ws)).toHaveLength(1), { timeout: 10_000 });
+
+    expect(await first).toMatch(/^fresh: re-indexed/);
     expect(await indexCalls(ws)).toHaveLength(1);
   });
 
@@ -258,6 +254,16 @@ describe("detect_changes index freshness", { timeout: 15_000 }, () => {
     expect(await first).toMatch(/^fresh: re-indexed/);
     expect(await second).toMatch(/^fresh: re-indexed/);
     expect(await indexCalls(ws)).toHaveLength(2);
+  });
+
+  it("re-indexes for an edit made less than a second before another client's index stamp", async () => {
+    const ws = await workspace(FILES);
+    await knownProjects(ws, [{ name: "repo", indexedAgoMs: 0 }]);
+    const state = JSON.parse(await readFile(ws.statePath, "utf8")) as { projects: Array<{ indexed_at: string }> };
+    const edited = new Date(Date.parse(state.projects[0]!.indexed_at) - 500);
+    await utimes(join(ws.root, "src/a.ts"), edited, edited);
+
+    expect(await detectChanges(session(ws), ws)).toMatch(/^fresh: re-indexed/);
   });
 
   it("re-indexes after editing a file that only the global git excludes file hides", async () => {
@@ -303,6 +309,16 @@ describe("auto-refresh freshness", { timeout: 15_000 }, () => {
     await writeFile(join(ws.root, "src/a.ts"), "export const a = 2;\n");
     expect(await s.indexing.indexCurrentRepo(ws.root)).toMatchObject({ status: "indexed" });
     expect(await indexCalls(ws)).toHaveLength(2);
+  });
+
+  it("vouches for its own unchanged graph from the index record, without asking cbm", async () => {
+    const ws = await workspace(FILES);
+    const s = session(ws);
+    expect(await s.indexing.indexCurrentRepo(ws.root)).toMatchObject({ status: "indexed" });
+    const statusCalls = (await loggedCalls(ws, "index_status")).length;
+
+    expect(await s.indexing.indexCurrentRepo(ws.root)).toMatchObject({ status: "fresh" });
+    expect(await loggedCalls(ws, "index_status")).toHaveLength(statusCalls);
   });
 
   it("does not re-index when another session indexed between this session's check and its lease", async () => {
