@@ -21,6 +21,7 @@ const LOCKS_DIRECTORY = "locks";
 const QUEUE_DIRECTORY = "index-queue";
 const PENDING_DIRECTORY = "index-pending";
 const SLOTS_DIRECTORY = "index-slots";
+const RECORDS_DIRECTORY = "index-records";
 const QUEUE_LOCK_NAME = "queue.lock";
 const QUEUE_SEQUENCE_NAME = "queue-sequence";
 
@@ -35,6 +36,14 @@ export const INDEX_LEASE_HELD_REASON = "another session is indexing; retry defer
 export type IndexLeaseResult =
   | { ok: true; lease: IndexLease }
   | { ok: false; reason: string };
+
+/** A successful pi-cbm index of `project` at `root`; times are epoch ms. */
+export type IndexRecord = {
+  project: string;
+  root: string;
+  startedAt: number;
+  finishedAt: number;
+};
 
 export type RetryRange = readonly [number, number];
 
@@ -315,8 +324,41 @@ export class IndexCoordinator {
     }
   }
 
+  /** The last successful pi-cbm index of `project`, shared by every session using this cache dir. */
+  async readIndexRecord(project: string): Promise<IndexRecord | undefined> {
+    const value = await readJson(this.indexRecordPath(project));
+    if (
+      !value ||
+      value.project !== project ||
+      typeof value.root !== "string" ||
+      typeof value.startedAt !== "number" ||
+      typeof value.finishedAt !== "number"
+    ) {
+      return undefined;
+    }
+    return { project, root: value.root, startedAt: value.startedAt, finishedAt: value.finishedAt };
+  }
+
+  /** Replace the record atomically, so a concurrent reader sees the old or the new one, never a partial file. */
+  async writeIndexRecord(record: IndexRecord): Promise<void> {
+    const path = this.indexRecordPath(record.project);
+    await mkdir(join(this.cacheDirectory, COORDINATION_DIRECTORY, RECORDS_DIRECTORY), { recursive: true, mode: 0o700 });
+    const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await writeExclusive(temporaryPath, record);
+      await rename(temporaryPath, path);
+    } catch (error) {
+      await unlink(temporaryPath).catch(() => undefined);
+      throw error;
+    }
+  }
+
   abortAll(): void {
     for (const controller of this.activeControllers) controller.abort();
+  }
+
+  private indexRecordPath(project: string): string {
+    return join(this.cacheDirectory, COORDINATION_DIRECTORY, RECORDS_DIRECTORY, `${projectKey(project)}.json`);
   }
 
   releaseAllSync(): void {
@@ -982,7 +1024,8 @@ function isErrno(error: unknown, code: string): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === code;
 }
 
-async function waitForRetry(delay: number, signal: AbortSignal | undefined): Promise<boolean> {
+/** Wait `delay` ms; false when `signal` aborted first. */
+export async function waitForRetry(delay: number, signal: AbortSignal | undefined): Promise<boolean> {
   if (signal?.aborted) return false;
   return new Promise((resolveWait) => {
     let settled = false;
