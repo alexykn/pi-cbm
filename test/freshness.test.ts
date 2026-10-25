@@ -263,6 +263,24 @@ describe("detect_changes index freshness", { timeout: 15_000 }, () => {
     expect(await indexCalls(ws)).toHaveLength(1);
   });
 
+  it("notices a freed lease promptly however long it has been waiting", async () => {
+    const ws = await workspace(FILES);
+    await knownProjects(ws, STALE);
+    await holdIndexes(ws);
+    const otherIndex = session(ws).indexing.indexCurrentRepo(ws.root);
+    await waitForIndexStart(ws);
+    // A coordinator whose later retries would outlast the deadline, so only a capped backoff answers fresh.
+    const coordinator = new IndexCoordinator({ cacheDirectory: ws.cacheDirectory, retryRanges: [[20, 20], [60_000, 60_000]] });
+    const acquire = vi.spyOn(coordinator, "acquire");
+    vi.stubEnv("PI_CBM_FRESH_INDEX_TIMEOUT_MS", "10000");
+    const answer = detectChanges(session(ws, coordinator), ws);
+    await vi.waitFor(() => expect(acquire.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+    await releaseIndexes(ws);
+
+    expect(await otherIndex).toMatchObject({ status: "indexed" });
+    expect(await answer).toMatch(/^fresh: no changes/);
+  });
+
   it("lets a call made during another call's refresh wait on that same re-index", async () => {
     const ws = await workspace(FILES);
     await knownProjects(ws, STALE);

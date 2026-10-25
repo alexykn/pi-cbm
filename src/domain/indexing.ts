@@ -19,6 +19,13 @@ const DETECT_CHANGES_CANCELLED = "codebase-memory-mcp detect_changes cancelled";
 /** How long `detect_changes` waits for the lease plus the re-index before answering from the existing graph. */
 const DEFAULT_FRESH_INDEX_TIMEOUT_MS = 30_000;
 
+/**
+ * Highest coordinator retry attempt a refresh backs off by while another index holds the lease:
+ * the first range (1-2 s by default) for every retry, so a lease freed well before the deadline is
+ * noticed. Each poll is a few mkdirs and a lock read, so the shorter wait costs little.
+ */
+const REFRESH_MAX_RETRY_ATTEMPT = 0;
+
 function resolveFreshIndexTimeoutMs(): number {
   return cbmEnvPositiveInt("FRESH_INDEX_TIMEOUT_MS", DEFAULT_FRESH_INDEX_TIMEOUT_MS);
 }
@@ -303,7 +310,7 @@ export class IndexingService {
         const coordination = await this.indexCoordinator.acquire(root, waiting.signal);
         if (coordination.ok) return { ok: true, lease: coordination.lease, waited: attempt > 0 };
         if (coordination.reason !== INDEX_LEASE_HELD_REASON) return coordination;
-        if (!(await this.indexCoordinator.waitToRetry(attempt, waiting.signal))) return { ok: false, reason: "gave up waiting for another index" };
+        if (!(await this.indexCoordinator.waitToRetry(Math.min(attempt, REFRESH_MAX_RETRY_ATTEMPT), waiting.signal))) return { ok: false, reason: "gave up waiting for another index" };
       }
     } finally {
       clearTimeout(giveUp);
