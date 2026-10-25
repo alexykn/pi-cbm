@@ -170,7 +170,7 @@ The `CBM_*` aliases for pi-cbm's own settings, and the old binary variables, are
 | `CBM_FRESH_INDEX_TIMEOUT_MS` | `PI_CBM_FRESH_INDEX_TIMEOUT_MS` |
 | `CBM_SKIP_VERSION_CHECK` | `PI_CBM_SKIP_VERSION_CHECK` |
 
-`CBM_CACHE_DIR` keeps working (see above).
+`CBM_CACHE_DIR` keeps working (see above). When a removed name is set and its replacement is not, the first session start shows a warning naming the replacement; the old value is ignored.
 
 ## Index freshness
 

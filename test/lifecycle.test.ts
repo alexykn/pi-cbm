@@ -89,7 +89,7 @@ describe("lifecycle auto-refresh", () => {
     const context = {
       cwd: "/repo",
       signal: new AbortController().signal,
-      ui: { setStatus: vi.fn() },
+      ui: { setStatus: vi.fn(), notify: vi.fn() },
     };
 
     registerLifecycle(pi, services);
@@ -104,5 +104,43 @@ describe("lifecycle auto-refresh", () => {
     handlers.get("session_shutdown")?.({}, context);
     await vi.advanceTimersByTimeAsync(expectedInterval * 2);
     expect(indexCurrentRepo).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("lifecycle removed environment variables", () => {
+  function startSessions(count: number) {
+    return import("../src/extension/lifecycle.js").then(({ registerLifecycle }) => {
+      const { handlers, pi } = registerHandlers();
+      const services = {
+        cbm: { checkVersion: async () => ({ status: "ok" }), takeVersionNotices: () => [] },
+        indexing: { indexCurrentRepo: vi.fn().mockResolvedValue({ status: "skipped", reason: "test" }) },
+        settings: { reload: vi.fn() },
+      } as unknown as CbmServices;
+      const notify = vi.fn();
+      const context = { cwd: "/repo", signal: new AbortController().signal, ui: { setStatus: vi.fn(), notify } };
+      registerLifecycle(pi, services);
+      for (let session = 0; session < count; session++) {
+        handlers.get("session_start")?.({}, context);
+        handlers.get("session_shutdown")?.({}, context);
+      }
+      return notify;
+    });
+  }
+
+  it("warns once about a removed variable whose replacement is unset, naming the replacement", async () => {
+    vi.stubEnv("CODEBASE_MEMORY_MCP_BIN", "/opt/cbm/codebase-memory-mcp");
+    vi.stubEnv("CBM_FRESH_INDEX_TIMEOUT_MS", "5000");
+
+    const notify = await startSessions(2);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(expect.stringMatching(/CODEBASE_MEMORY_MCP_BIN \(use PI_CBM_BIN\).*CBM_FRESH_INDEX_TIMEOUT_MS \(use PI_CBM_FRESH_INDEX_TIMEOUT_MS\)/), "warning");
+  });
+
+  it("does not warn when the replacement is set, nor for cbm's own CBM_CACHE_DIR", async () => {
+    vi.stubEnv("CBM_BIN", "/opt/cbm/codebase-memory-mcp");
+    vi.stubEnv("PI_CBM_BIN", "/opt/cbm/codebase-memory-mcp");
+    vi.stubEnv("CBM_CACHE_DIR", "/tmp/cbm-cache");
+
+    expect(await startSessions(1)).not.toHaveBeenCalled();
   });
 });

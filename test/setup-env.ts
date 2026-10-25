@@ -10,6 +10,13 @@ const CONFIGURED_ENV = [
   "CBM_CACHE_DIR",
   "PI_CBM_SKIP_VERSION_CHECK",
   "PI_CBM_BIN",
+  // Removed names: set, they make the session start warn.
+  "CODEBASE_MEMORY_MCP_BIN",
+  "CBM_BIN",
+  "CBM_MAX_CONCURRENT_INDEXES",
+  "CBM_AUTO_REFRESH_INTERVAL_MS",
+  "CBM_FRESH_INDEX_TIMEOUT_MS",
+  "CBM_SKIP_VERSION_CHECK",
 ];
 
 const ambient = new Map(CONFIGURED_ENV.map((key) => [key, process.env[key]]));

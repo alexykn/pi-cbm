@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { CbmServices } from "../pi-tools/definitions.js";
-import { cbmEnvPositiveInt } from "../shared/env.js";
+import { cbmEnvPositiveInt, removedEnvWarning } from "../shared/env.js";
 import { CODEBASE_MEMORY_PROMPT } from "./prompt.js";
 
 const DEFAULT_AUTO_REFRESH_INTERVAL_MS = 60_000;
@@ -33,11 +33,20 @@ export function registerLifecycle(pi: ExtensionAPI, services: CbmServices) {
   // The session generation that currently owns an in-flight index, used to keep
   // a single active index per session without leaking state across sessions.
   let inFlightGeneration: number | undefined;
+  let removedEnvChecked = false;
 
   // Compatibility notices go to the user, not only into tool errors the agent sees.
   function showVersionNotices(session: SessionResources, generation: number) {
     if (generation !== sessionGeneration) return;
     for (const notice of services.cbm.takeVersionNotices()) session.ui.notify(notice.message, notice.level);
+  }
+
+  // Once per process: a leftover old variable name would otherwise be ignored silently.
+  function warnAboutRemovedEnv(session: SessionResources) {
+    if (removedEnvChecked) return;
+    removedEnvChecked = true;
+    const warning = removedEnvWarning();
+    if (warning) session.ui.notify(warning, "warning");
   }
 
   async function checkVersion(session: SessionResources, generation: number) {
@@ -94,6 +103,7 @@ export function registerLifecycle(pi: ExtensionAPI, services: CbmServices) {
     const generation = sessionGeneration + 1;
     sessionGeneration = generation;
 
+    warnAboutRemovedEnv(session);
     void checkVersion(session, generation);
     void indexCurrentRepo(session, generation);
     refreshTimer = setInterval(() => {
