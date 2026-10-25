@@ -5,7 +5,7 @@ import { CbmToolError } from "../cbm/errors.js";
 import { removeUndefined } from "../shared/object.js";
 import { isAbsolutePath, isWithin, looksLikePath, normalizePathKey } from "../shared/paths.js";
 import { errorText, errorTextWithDetails } from "../shared/strings.js";
-import type { CbmProject, ProjectCatalog } from "./project-catalog.js";
+import { isDerivedName, type CbmProject, type ProjectCatalog } from "./project-catalog.js";
 
 const MAX_LISTED_PROJECTS = 10;
 
@@ -22,26 +22,6 @@ type ProjectRoot = { project: CbmProject; root: string };
 /** A cbm error payload (not a message that happens to embed one) saying the project is unknown. */
 function isProjectError(data: unknown): boolean {
   return PROJECT_ERROR_PATTERN.test(errorText(data));
-}
-
-/**
- * The name cbm gives a root indexed without `name`: characters outside
- * [A-Za-z0-9._-] become "-", runs collapse, and leading/trailing separators drop
- * (`/tmp/cbm-fixture-repo` -> `tmp-cbm-fixture-repo`).
- */
-function derivedProjectName(rootPath: string): string {
-  const name = rootPath
-    .replaceAll("\\", "/")
-    .replace(/[^A-Za-z0-9._-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/\.+/g, ".")
-    .replace(/^[-.]+/, "")
-    .replace(/-+$/, "");
-  return name || "root";
-}
-
-function isDerivedName(project: CbmProject): boolean {
-  return project.root_path !== undefined && project.name === derivedProjectName(project.root_path);
 }
 
 /**

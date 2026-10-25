@@ -1,7 +1,8 @@
+import { resolve } from "node:path";
 import { CbmClient } from "../cbm/client.js";
 import { CbmToolError } from "../cbm/errors.js";
 import { awaitWithSignal } from "../shared/concurrency.js";
-import { isAbsolutePath, relativeTo } from "../shared/paths.js";
+import { isAbsolutePath, normalizePathKey, relativeTo } from "../shared/paths.js";
 
 /** Keep a missing `root_path` cached briefly so one failed lookup doesn't re-run per node in a batch. */
 const ROOT_PATH_MISS_TTL_MS = 30_000;
@@ -29,6 +30,27 @@ type ListProjectsData = {
   error?: string;
   hint?: string;
 };
+
+/**
+ * The name cbm gives a root indexed without `name`: characters outside
+ * [A-Za-z0-9._-] become "-", runs collapse, and leading/trailing separators drop
+ * (`/tmp/cbm-fixture-repo` -> `tmp-cbm-fixture-repo`).
+ */
+function derivedProjectName(rootPath: string): string {
+  const name = rootPath
+    .replaceAll("\\", "/")
+    .replace(/[^A-Za-z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/\.+/g, ".")
+    .replace(/^[-.]+/, "")
+    .replace(/-+$/, "");
+  return name || "root";
+}
+
+/** True for the name cbm itself would give this project's root. */
+export function isDerivedName(project: CbmProject): boolean {
+  return project.root_path !== undefined && project.name === derivedProjectName(project.root_path);
+}
 
 /** The sole owner of `list_projects`: paging, the TTL cache, and project root lookup. */
 export class ProjectCatalog {
@@ -76,6 +98,18 @@ export class ProjectCatalog {
       this.rootPathMisses.set(project, Date.now());
     });
     return awaitWithSignal(request, signal, PROJECT_CANCELLED).catch(() => undefined);
+  }
+
+  /**
+   * The project indexed exactly at `root`, fetched fresh. Two projects can
+   * share a root; prefer cbm's derived name there, as tool resolution does.
+   */
+  async projectAt(root: string, signal?: AbortSignal): Promise<string | undefined> {
+    const key = normalizePathKey(resolve(root));
+    const matches = (await this.list(signal, { force: true })).filter(
+      (project) => project.root_path !== undefined && normalizePathKey(resolve(project.root_path)) === key,
+    );
+    return (matches.find(isDerivedName) ?? matches.sort((a, b) => a.name.localeCompare(b.name))[0])?.name;
   }
 
   /**
