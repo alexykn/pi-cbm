@@ -41,6 +41,21 @@ export function registerLifecycle(pi: ExtensionAPI, services: CbmServices) {
   // a single active index per session without leaking state across sessions.
   let inFlightGeneration: number | undefined;
 
+  // Compatibility notices go to the user, not only into tool errors the agent sees.
+  function showVersionNotices(session: SessionResources, generation: number) {
+    if (generation !== sessionGeneration) return;
+    for (const notice of services.cbm.takeVersionNotices()) session.ui.notify(notice.message, notice.level);
+  }
+
+  async function checkVersion(session: SessionResources, generation: number) {
+    try {
+      await services.cbm.checkVersion(session.signal);
+    } catch {
+      // A missing binary or a cancelled session: the index status line reports it.
+    }
+    showVersionNotices(session, generation);
+  }
+
   async function indexCurrentRepo(session: SessionResources, generation: number) {
     if (generation !== sessionGeneration) return; // stale session: skip
     if (inFlightGeneration === generation || session.signal?.aborted) return;
@@ -63,6 +78,7 @@ export function registerLifecycle(pi: ExtensionAPI, services: CbmServices) {
       session.ui.setStatus("codebase-memory", `cbm index failed${reason}`);
     } finally {
       if (inFlightGeneration === generation) inFlightGeneration = undefined;
+      showVersionNotices(session, generation);
     }
   }
 
@@ -81,6 +97,7 @@ export function registerLifecycle(pi: ExtensionAPI, services: CbmServices) {
     const generation = sessionGeneration + 1;
     sessionGeneration = generation;
 
+    void checkVersion(session, generation);
     void indexCurrentRepo(session, generation);
     refreshTimer = setInterval(() => {
       void indexCurrentRepo(session, generation);

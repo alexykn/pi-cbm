@@ -5,12 +5,24 @@ import { CbmToolError } from "./errors.js";
 import { normalizeCbmData } from "./normalize.js";
 import type { CbmCallOptions, CbmCallResult } from "./result.js";
 import { DEFAULT_QUERY_TIMEOUT_MS } from "./timeouts.js";
-import { checkCbmVersion } from "./version.js";
+import { CbmVersionGate, type CbmVersionCheck, type CbmVersionNotice } from "./version.js";
 import { formatSize } from "../shared/strings.js";
 
 const MAX_STDIO_BYTES = 50 * 1024 * 1024;
 
 export class CbmClient {
+  constructor(private readonly versionGate = new CbmVersionGate()) {}
+
+  /** Probe the configured binary's version (once per binary; see `takeVersionNotices`). */
+  async checkVersion(signal?: AbortSignal): Promise<CbmVersionCheck> {
+    return this.versionGate.check(await resolveCbmBinary(), signal);
+  }
+
+  /** Compatibility notices (too old, untested newer, unknown version) not yet shown to the user. */
+  takeVersionNotices(): CbmVersionNotice[] {
+    return this.versionGate.takeNotices();
+  }
+
   async findGitRoot(cwd: string, signal?: AbortSignal): Promise<string | undefined> {
     const child = spawn("git", ["rev-parse", "--show-toplevel"], {
       cwd,
@@ -41,7 +53,7 @@ export class CbmClient {
 
   async callTool(toolName: string, args: Record<string, unknown>, options: CbmCallOptions = {}): Promise<CbmCallResult> {
     const binary = await resolveCbmBinary();
-    const version = await checkCbmVersion(binary);
+    const version = await this.versionGate.check(binary, options.signal);
     if (version.status === "too-old") {
       throw new Error(version.message ?? `codebase-memory-mcp ${version.version ?? "?"} is unsupported`);
     }

@@ -1,6 +1,5 @@
 import { CbmClient } from "../cbm/client.js";
 import { queryTimeoutMs } from "../cbm/timeouts.js";
-import { detectedCbmVersion } from "../cbm/version.js";
 import { mapLimit } from "../shared/concurrency.js";
 import { clampInt } from "../shared/numbers.js";
 import { isRecord, numberProp, removeUndefined, stringProp } from "../shared/object.js";
@@ -55,7 +54,7 @@ function searchResultRows(data: unknown, tool: string): unknown[] {
 
   const keys = isRecord(data) ? Object.keys(data).join(", ") || "(none)" : typeof data;
   throw new Error(
-    `codebase-memory-mcp ${tool} returned an unrecognized result shape (cbm ${detectedCbmVersion()}): ` +
+    `codebase-memory-mcp ${tool} returned an unrecognized result shape: ` +
       `expected an object with a "results" array, received keys: ${keys}.`,
   );
 }

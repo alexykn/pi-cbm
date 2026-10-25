@@ -98,14 +98,14 @@ export CODEBASE_MEMORY_MCP_BIN="$HOME/.local/bin/codebase-memory-mcp"
 
 This extension requires `codebase-memory-mcp` >= 0.12 and targets the 0.12.x CLI contract (`>=0.12.0 <0.13.0`). Captured/tested versions are 0.12.1 (target) and 0.9.0 (old-shape baseline); 0.10.x and 0.11.x were not tested, and the version gate rejects them conservatively. The 0.9.0 fixtures confirm the older shapes differ (`search_graph` object arrays instead of `cols`/`rows` groups, JSON-only `list_projects`), which this client does not parse; a version with those shapes cannot return useful results.
 
-On startup the extension probes the binary and fails loudly on an unsupported version instead of silently returning empty results:
+When a Pi session starts, the extension probes the binary. An unsupported version is shown to you once as an error notification telling you to upgrade, and every graph tool fails with the same message instead of silently returning empty results:
 
 ```text
 codebase-memory-mcp 0.10.0 is unsupported; pi-cbm requires 0.12.x (>=0.12.0 <0.13.0).
 Upgrade codebase-memory-mcp, or reinstall an earlier pi-cbm release (<= 1.2.1) to keep using it.
 ```
 
-A newer untested major/minor continues with a one-time warning instead of failing. Set `PI_CBM_SKIP_VERSION_CHECK=1` to skip the probe (useful for packaged/vendored binaries and for tests).
+A newer untested major/minor, or a version string that cannot be read, continues with a one-time warning notification instead of failing. Set `PI_CBM_SKIP_VERSION_CHECK=1` to skip the probe (useful for packaged/vendored binaries and for tests).
 
 CLI output is normalized before it reaches the tools, so the 0.12 table shapes (`cols`/`rows`, `groups` with `qn_prefix`, `{cols,rows}` label tables, absolute `file` paths, tree-text `list_projects`) are converted to the object arrays and project resolution behavior the rest of the extension expects.
 

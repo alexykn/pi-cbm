@@ -1,5 +1,6 @@
 import { CbmClient } from "../cbm/client.js";
 import { CbmToolError } from "../cbm/errors.js";
+import { awaitWithSignal } from "../shared/concurrency.js";
 import { isAbsolutePath, relativeTo } from "../shared/paths.js";
 
 /** Keep a missing `root_path` cached briefly so one failed lookup doesn't re-run per node in a batch. */
@@ -42,7 +43,7 @@ export class ProjectCatalog {
   async list(signal?: AbortSignal, options: { force?: boolean } = {}): Promise<CbmProject[]> {
     const cached = this.projectsCache;
     if (!options.force && cached && Date.now() - cached.at < PROJECTS_CACHE_TTL_MS) return cached.value;
-    if (!options.force && this.projectsInFlight) return this.awaitWithSignal(this.projectsInFlight, signal);
+    if (!options.force && this.projectsInFlight) return awaitWithSignal(this.projectsInFlight, signal, PROJECT_CANCELLED);
 
     const generation = this.projectsGeneration;
     const request = this.fetchProjects().then((projects) => {
@@ -54,13 +55,13 @@ export class ProjectCatalog {
       if (this.projectsInFlight === tracked) this.projectsInFlight = undefined;
     });
     if (!options.force) this.projectsInFlight = tracked;
-    return this.awaitWithSignal(tracked, signal);
+    return awaitWithSignal(tracked, signal, PROJECT_CANCELLED);
   }
 
   /** The indexed `root_path` of `project`, or undefined when it is unknown or the lookup failed. */
   rootPath(project: string, signal?: AbortSignal): Promise<string | undefined> {
     const cached = this.rootPaths.get(project);
-    if (cached) return this.awaitWithSignal(cached, signal).catch(() => undefined);
+    if (cached) return awaitWithSignal(cached, signal, PROJECT_CANCELLED).catch(() => undefined);
     const missAt = this.rootPathMisses.get(project);
     if (missAt !== undefined && Date.now() - missAt < ROOT_PATH_MISS_TTL_MS) return Promise.resolve(undefined);
 
@@ -74,7 +75,7 @@ export class ProjectCatalog {
       this.rootPaths.delete(project);
       this.rootPathMisses.set(project, Date.now());
     });
-    return this.awaitWithSignal(request, signal).catch(() => undefined);
+    return awaitWithSignal(request, signal, PROJECT_CANCELLED).catch(() => undefined);
   }
 
   /**
@@ -125,16 +126,5 @@ export class ProjectCatalog {
       if (data.has_more !== true || page.length === 0) break;
     }
     return projects;
-  }
-
-  /** Let one caller stop waiting on a shared fetch without cancelling it for the others. */
-  private async awaitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-    if (!signal) return promise;
-    if (signal.aborted) throw new Error(PROJECT_CANCELLED);
-    return new Promise<T>((resolvePromise, reject) => {
-      const onAbort = () => reject(new Error(PROJECT_CANCELLED));
-      signal.addEventListener("abort", onAbort, { once: true });
-      void promise.then(resolvePromise, reject).finally(() => signal.removeEventListener("abort", onAbort));
-    });
   }
 }
