@@ -138,13 +138,15 @@ export class IndexingService {
     if (!root) return { fresh: false, reason: "project root not found on disk; index not refreshed" };
 
     const key = `${project}\0${normalizePathKey(resolve(root))}`;
-    let refresh = this.refreshes.get(key);
-    if (!refresh) {
-      const check = await this.checkFreshness(project, root, ctx.signal);
-      if (check.fresh) return { fresh: true, reindexed: false, age_ms: Date.now() - check.reference };
-      refresh = this.refreshes.get(key) ?? this.startRefresh(key, project, root, check.reference);
-    }
-    return this.awaitRefresh(refresh, ctx.signal);
+    const deadline = AbortSignal.timeout(resolveFreshIndexTimeoutMs());
+    const joined = this.refreshes.get(key);
+    const joinedResult = joined && (await this.awaitRefresh(joined, ctx.signal, deadline));
+    // The joined refresh may have started indexing before this caller's latest edit, so check again.
+    if (joinedResult && !joinedResult.fresh) return joinedResult;
+    const check = await this.checkFreshness(project, root, ctx.signal);
+    if (check.fresh) return { fresh: true, reindexed: joinedResult?.reindexed ?? false, age_ms: Date.now() - check.reference };
+    const refresh = this.refreshes.get(key) ?? this.startRefresh(key, project, root, check.reference);
+    return this.awaitRefresh(refresh, ctx.signal, deadline);
   }
 
   /** Index an exact path through the coordinator lease; skipped when another session holds it. */
@@ -247,8 +249,7 @@ export class IndexingService {
   }
 
   /** A caller abort rethrows; the timeout answers stale. Neither stops the refresh. */
-  private async awaitRefresh(refresh: Refresh, signal: AbortSignal | undefined): Promise<IndexFreshness> {
-    const deadline = AbortSignal.timeout(resolveFreshIndexTimeoutMs());
+  private async awaitRefresh(refresh: Refresh, signal: AbortSignal | undefined, deadline: AbortSignal): Promise<IndexFreshness> {
     try {
       return await awaitWithSignal(refresh.result, signal ? AbortSignal.any([signal, deadline]) : deadline, DETECT_CHANGES_CANCELLED);
     } catch (error) {

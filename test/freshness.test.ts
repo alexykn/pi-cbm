@@ -242,6 +242,24 @@ describe("detect_changes index freshness", { timeout: 15_000 }, () => {
     expect(await indexCalls(ws)).toHaveLength(1);
   });
 
+  it("re-indexes for an edit made after the joined refresh started indexing", async () => {
+    const ws = await workspace(FILES);
+    await knownProjects(ws, STALE);
+    const s = session(ws);
+    await holdIndexes(ws);
+    const first = detectChanges(s, ws);
+    await waitForIndexStart(ws);
+    await writeFile(join(ws.root, "src/a.ts"), "export const a = 3;\n");
+    const second = detectChanges(s, ws);
+    // Give the second call time to join the running refresh before it finishes.
+    await sleep(1_000);
+    await releaseIndexes(ws);
+
+    expect(await first).toMatch(/^fresh: re-indexed/);
+    expect(await second).toMatch(/^fresh: re-indexed/);
+    expect(await indexCalls(ws)).toHaveLength(2);
+  });
+
   it("trusts a later index by another client over pi-cbm's own record", async () => {
     const ws = await workspace(FILES);
     await knownProjects(ws, STALE);
