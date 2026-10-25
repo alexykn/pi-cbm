@@ -236,11 +236,12 @@ export class ProjectService {
 
   private projectRootPath(project: string, signal?: AbortSignal): Promise<string | undefined> {
     const cached = this.rootPaths.get(project);
-    if (cached) return cached;
+    if (cached) return this.awaitWithSignal(cached, signal).catch(() => undefined);
     const missAt = this.rootPathMisses.get(project);
     if (missAt !== undefined && Date.now() - missAt < ROOT_PATH_MISS_TTL_MS) return Promise.resolve(undefined);
 
-    const request = this.listProjects(signal)
+    // Shared lookup runs without the caller's signal so one aborted caller cannot record a miss for everyone.
+    const request = this.listProjects()
       .then((projects) => projects.find((entry) => entry.name === project)?.root_path)
       .catch(() => undefined);
     this.rootPaths.set(project, request);
@@ -249,7 +250,7 @@ export class ProjectService {
       this.rootPaths.delete(project);
       this.rootPathMisses.set(project, Date.now());
     });
-    return request;
+    return this.awaitWithSignal(request, signal).catch(() => undefined);
   }
 
   /**

@@ -185,6 +185,20 @@ describe("ProjectService.resolveProject", () => {
     expect(listArgs).toHaveLength(1);
   });
 
+  it("does not let an aborted caller hide the project root from a concurrent caller", async () => {
+    let release!: (value: CbmCallResult) => void;
+    const { service } = serviceWith({ list: () => new Promise<CbmCallResult>((resolve) => (release = resolve)) });
+    const controller = new AbortController();
+    const aborted = service.relativizePaths({ file_path: "/work/repo/src/a.ts" }, "repo", controller.signal);
+    const waiting = service.relativizePaths({ file_path: "/work/repo/src/a.ts" }, "repo");
+    controller.abort();
+    release(okPage([{ name: "repo", root_path: "/work/repo" }]));
+
+    await aborted;
+    await expect(waiting).resolves.toEqual({ file_path: "src/a.ts" });
+    await expect(service.relativizePaths({ file_path: "/work/repo/src/a.ts" }, "repo")).resolves.toEqual({ file_path: "src/a.ts" });
+  });
+
   it("does not cache a fetch that raced an index", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
