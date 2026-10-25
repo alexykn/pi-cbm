@@ -139,9 +139,9 @@ Registers:
 - `query_graph`
 - `detect_changes`
 
-Most tools accept optional `project`. When omitted, the extension infers it from indexed project roots matching Pi's current working directory. Agents should omit `project` for cwd/current-project work and provide it only when intentionally querying an external indexed project. A `project` value must be an indexed project name or a path: absolute, or explicitly relative to the current working directory (`.`, `..`, or containing a `/`). A bare word such as `other-repo` is always treated as a project name, never as a directory under the cwd. An unknown value fails with the indexed project list instead of falling back to a guessed name.
+Most tools accept optional `project`. When omitted, the extension infers it from indexed project roots matching Pi's current working directory. Agents should omit `project` for cwd/current-project work and provide it only when intentionally querying an external indexed project. A `project` value must be an indexed project name or a path: absolute, or explicitly relative to the current working directory (`.`, `..`, or containing a `/`). A bare word such as `other-repo` is always treated as a project name, never as a directory under the cwd. An unknown value fails with the indexed project list instead of falling back to a guessed name. If the project list itself cannot be read, an explicit name is passed to `codebase-memory-mcp` unchanged, so its own "project not found" answer still applies.
 
-Matching uses the longest indexed root that contains the working directory, so a git worktree or nested checkout that is not indexed itself resolves to the containing repo's graph. Index the worktree separately to query its own graph.
+Matching uses the longest indexed root that contains the working directory, so a git worktree or nested checkout that is not indexed itself resolves to the containing repo's graph. Index the worktree separately to query its own graph. When two indexed projects share one root (the default name plus a custom `name`), path and cwd resolution picks the default derived name; pass the custom name explicitly to query that one.
 
 ## Commands
 
