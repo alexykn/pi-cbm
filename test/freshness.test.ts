@@ -78,10 +78,10 @@ async function knownProjects(ws: Workspace, projects: Array<{ name: string; inde
 }
 
 /** A pi session: its own client, catalog and coordinator over the shared cache dir. */
-function session(ws: Workspace) {
+function session(ws: Workspace, coordinator = new IndexCoordinator({ cacheDirectory: ws.cacheDirectory })) {
   const cbm = new CbmClient();
   const catalog = new ProjectCatalog(cbm);
-  const indexing = new IndexingService(cbm, { autoIndexNonGitDirectories: true }, new IndexCoordinator({ cacheDirectory: ws.cacheDirectory }), catalog);
+  const indexing = new IndexingService(cbm, { autoIndexNonGitDirectories: true }, coordinator, catalog);
   const query = new QueryService(cbm, new ProjectResolver(cbm, catalog), catalog, indexing, new OutputService(), traceStub);
   return { indexing, query };
 }
@@ -100,6 +100,22 @@ const indexCalls = (ws: Workspace) => loggedCalls(ws, "index_repository");
 const finishedIndexes = (ws: Workspace) => loggedCalls(ws, "index_repository:done");
 const holdIndexes = (ws: Workspace) => writeFile(`${ws.statePath}.hold`, "");
 const releaseIndexes = (ws: Workspace) => unlink(`${ws.statePath}.hold`);
+
+/** A coordinator whose `acquire` waits for `gate`: its session checks now but gets the lease only after `gate` settled. */
+function gatedCoordinator(ws: Workspace, gate: Promise<unknown>) {
+  const coordinator = new IndexCoordinator({ cacheDirectory: ws.cacheDirectory });
+  const acquire = coordinator.acquire.bind(coordinator);
+  coordinator.acquire = async (...args: Parameters<typeof acquire>) => {
+    await gate.catch(() => undefined);
+    return acquire(...args);
+  };
+  return coordinator;
+}
+
+/** Wait until `count` freshness checks asked cbm for its index time, so a later check's verdict is fixed. */
+async function waitForStatusCalls(ws: Workspace, count: number) {
+  await vi.waitFor(async () => expect(await loggedCalls(ws, "index_status")).toHaveLength(count), { timeout: 10_000 });
+}
 
 async function waitForIndexStart(ws: Workspace) {
   await vi.waitFor(async () => expect(await indexCalls(ws)).toHaveLength(1), { timeout: 10_000 });
@@ -231,6 +247,22 @@ describe("detect_changes index freshness", { timeout: 15_000 }, () => {
     await waitForBackgroundIndex(ws);
   });
 
+  it("does not re-index when another session indexed between this call's check and its lease", async () => {
+    const ws = await workspace(FILES);
+    await knownProjects(ws, STALE);
+    await holdIndexes(ws);
+    const first = session(ws).indexing.indexCurrentRepo(ws.root);
+    await waitForIndexStart(ws);
+
+    const second = detectChanges(session(ws, gatedCoordinator(ws, first)), ws);
+    await waitForStatusCalls(ws, 2);
+    await releaseIndexes(ws);
+
+    expect(await first).toMatchObject({ status: "indexed" });
+    expect(await second).toMatch(/^fresh: no changes/);
+    expect(await indexCalls(ws)).toHaveLength(1);
+  });
+
   it("lets a call made during another call's refresh wait on that same re-index", async () => {
     const ws = await workspace(FILES);
     await knownProjects(ws, STALE);
@@ -257,9 +289,10 @@ describe("detect_changes index freshness", { timeout: 15_000 }, () => {
     const first = detectChanges(s, ws);
     await waitForIndexStart(ws);
     await writeFile(join(ws.root, "src/a.ts"), "export const a = 3;\n");
+    // No public signal marks the join, so watch the private wait both calls go through.
+    const awaitRefresh = vi.spyOn(s.indexing as unknown as { awaitRefresh: () => Promise<unknown> }, "awaitRefresh");
     const second = detectChanges(s, ws);
-    // Give the second call time to join the running refresh before it finishes.
-    await sleep(1_000);
+    await vi.waitFor(() => expect(awaitRefresh).toHaveBeenCalledTimes(1), { timeout: 10_000 });
     await releaseIndexes(ws);
 
     expect(await first).toMatch(/^fresh: re-indexed/);
@@ -320,6 +353,8 @@ describe("auto-refresh freshness", { timeout: 15_000 }, () => {
     await writeFile(join(ws.root, "src/a.ts"), "export const a = 2;\n");
     expect(await s.indexing.indexCurrentRepo(ws.root)).toMatchObject({ status: "indexed" });
     expect(await indexCalls(ws)).toHaveLength(2);
+    // The check under the lease reuses the first check when no other index finished in between.
+    expect(await loggedCalls(ws, "index_status")).toHaveLength(1);
   });
 
   it("vouches for its own unchanged graph from the index record, without asking cbm", async () => {
@@ -340,15 +375,8 @@ describe("auto-refresh freshness", { timeout: 15_000 }, () => {
     await waitForIndexStart(ws);
 
     // The second session checks while the first index runs, but gets the lease only after it finished.
-    const coordinator = new IndexCoordinator({ cacheDirectory: ws.cacheDirectory });
-    const acquire = coordinator.acquire.bind(coordinator);
-    coordinator.acquire = async (...args: Parameters<typeof acquire>) => {
-      await first;
-      return acquire(...args);
-    };
-    const cbm = new CbmClient();
-    const second = new IndexingService(cbm, { autoIndexNonGitDirectories: true }, coordinator, new ProjectCatalog(cbm)).indexCurrentRepo(ws.root);
-    await sleep(1_500);
+    const second = session(ws, gatedCoordinator(ws, first)).indexing.indexCurrentRepo(ws.root);
+    await waitForStatusCalls(ws, 2);
     await releaseIndexes(ws);
 
     expect(await first).toMatchObject({ status: "indexed" });
