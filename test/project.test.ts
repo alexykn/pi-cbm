@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +14,14 @@ type ProjectRow = { name: string; root_path: string };
 
 function okPage(projects: ProjectRow[], hasMore = false): CbmCallResult {
   return { ok: true, data: { projects, total: projects.length, has_more: hasMore }, rawText: "", stderr: "" };
+}
+
+/** A captured 0.12.1 `list_projects --format json` result. */
+function listFixture(name: string): CbmCallResult {
+  const envelope = JSON.parse(readFileSync(new URL(`./fixtures/cbm-0.12.1/list_projects.${name}.json`, import.meta.url), "utf8")) as {
+    content: Array<{ text: string }>;
+  };
+  return { ok: true, data: JSON.parse(envelope.content[0]!.text), rawText: "", stderr: "" };
 }
 
 function errorResult(error: string): CbmCallResult {
@@ -68,18 +77,16 @@ describe("project resolution", () => {
   });
 
   it("prefers cbm's derived name when a custom-named project shares the same root", async () => {
-    // cbm 0.12 lists both after indexing a root by default and again with `name`; "custom-x" sorts first.
-    const { resolver } = serviceWith({
-      list: () =>
-        okPage([
-          { name: "custom-x", root_path: "/work/my.repo_x" },
-          { name: "work-my.repo_x", root_path: "/work/my.repo_x" },
-        ]),
-    });
+    // Captured: one root indexed by default and again as "custom-shared-root", which sorts first.
+    const listed = listFixture("shared-root");
+    const projects = (listed.data as { projects: ProjectRow[] }).projects;
+    const root = projects.find((project) => project.name === "custom-shared-root")!.root_path;
+    const derived = projects.find((project) => project.root_path === root && project.name !== "custom-shared-root")!.name;
+    const { resolver } = serviceWith({ list: () => listed });
 
-    await expect(resolver.resolveProject(undefined, "/work/my.repo_x/src")).resolves.toBe("work-my.repo_x");
-    await expect(resolver.resolveProject("/work/my.repo_x", "/home/user")).resolves.toBe("work-my.repo_x");
-    await expect(resolver.resolveProject("custom-x", "/home/user")).resolves.toBe("custom-x");
+    await expect(resolver.resolveProject(undefined, `${root}/src`)).resolves.toBe(derived);
+    await expect(resolver.resolveProject(root, "/home/user")).resolves.toBe(derived);
+    await expect(resolver.resolveProject("custom-shared-root", "/home/user")).resolves.toBe("custom-shared-root");
   });
 
   it("fails loudly with the indexed projects when the cwd matches nothing", async () => {

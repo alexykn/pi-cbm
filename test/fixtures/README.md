@@ -5,7 +5,11 @@ Raw output captured from two `codebase-memory-mcp` (cbm) builds by
 repo's own `src/` (no private paths). The tests read these files instead of
 re-capturing.
 
-- `cbm-0.12.1/` — 54 files, captured from cbm 0.12.1.
+- `cbm-0.12.1/` — 62 files, captured from cbm 0.12.1. The `list_projects.help`,
+  `list_projects.paged`, `list_projects.shared-root` and `search_graph.label-page2`
+  cases were added later, by the `mktemp -d` version of the script on macOS, so
+  their root paths sit under `/private/tmp/cbm-capture-*` and their qn line ranges
+  come from a newer `src/` than the rest.
 - `cbm-0.9.0/` — 48 files, captured from cbm 0.9.0.
 
 ## Fixture file format
@@ -17,7 +21,8 @@ Per case, two files:
 - `<tool>.<case>.meta.json` — `{ invocation, args_json, exit_code, duration_ms, stderr }`.
 
 Captured against project `tmp-cbm-fixture-repo` (cbm names a project from its
-absolute path: leading `/` dropped, `/` -> `-`), qn
+absolute path: leading `/` dropped, `/` -> `-`; newer captures pass that name
+explicitly), qn
 `tmp-cbm-fixture-repo.src.cbm.client.CbmClient.callTool`.
 
 ## Contract notes
@@ -126,22 +131,38 @@ compact tables reach domain consumers as object arrays:
 
 Domain consumers read `data.results` for `search_graph` and `search_code`.
 
+**Paging `list_projects` and `search_graph`.** 0.12 `list_projects` takes
+`--limit`/`--offset` flags (`list_projects.help.json`); a paged call echoes them
+and adds `next_offset` while `has_more` is true (`list_projects.paged.json`).
+`search_graph` honours a JSON `offset`: `search_graph.label-page2.json`
+(`limit: 3, offset: 3`) reports `next_offset: 6`.
+
+**One root, two projects.** Indexing a root by default and then again with
+`name` lists both projects with the same `root_path`
+(`list_projects.shared-root.json`). The order matters: once a root has a custom
+name, indexing it again without `name` updates the custom project instead of
+creating the derived one. cbm also canonicalizes the root (`/tmp` -> `/private/tmp`
+on macOS) before deriving the default name.
+
 ## Reproducing / refreshing
 
 ```sh
-# neutral fixture repo (project name tmp-cbm-fixture-repo)
-rm -rf /tmp/cbm-fixture-repo && mkdir -p /tmp/cbm-fixture-repo
-cp -r src /tmp/cbm-fixture-repo/src
-git -C /tmp/cbm-fixture-repo init -q && git -C /tmp/cbm-fixture-repo add -A
-git -C /tmp/cbm-fixture-repo -c user.email=fixture@example.com -c user.name=fixture commit -qm fixture
-
-# capture (per binary; re-creates the fixture repo, then dirties one file for detect_changes)
+# per binary; builds the fixture repos and the cbm cache in a fresh mktemp -d dir
 scripts/capture-fixtures.sh /tmp/cbm0121/codebase-memory-mcp 0.12.1
 scripts/capture-fixtures.sh /tmp/cbm090/codebase-memory-mcp 0.9.0
 
 npm run typecheck && npm test
 ```
 
-Safety: the script always points `CBM_CACHE_DIR` at a fresh temp dir. The real
+The script copies `src/` into a new repo inside its temp dir, indexes it,
+captures every case, and removes the temp dir on exit; it never reads or
+modifies an existing checkout. On 0.12 it indexes with
+`name: "tmp-cbm-fixture-repo"`, so project names and qn prefixes stay stable
+across captures; root paths do not. Tests still expect the
+`/tmp/cbm-fixture-repo` root of the original capture, so a full recapture means
+updating those expectations (or keeping the old files and committing only new
+cases).
+
+Safety: the script always points `CBM_CACHE_DIR` at its own temp dir. The real
 cache (`$HOME/.cache/codebase-memory-mcp`) must be byte-identical before and
 after a capture run — check with `ls -la` on that directory.

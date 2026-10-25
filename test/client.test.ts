@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChildProcess } from "node:child_process";
@@ -151,15 +152,20 @@ describe("CbmClient CLI transport", () => {
     expect(calls[0].child.stdinWrites).toEqual([]);
   });
 
-  it("forwards list_projects limit and offset as flags", async () => {
+  it("pages list_projects with the flags captured against real cbm 0.12.1", async () => {
     const directory = await temporaryDirectory();
     vi.stubEnv("CODEBASE_MEMORY_MCP_BIN", await fakeBinary(directory));
     vi.stubEnv("PI_CBM_SKIP_VERSION_CHECK", "1");
     const calls = stubSpawn("{}");
+    const captured = JSON.parse(readFileSync(new URL("./fixtures/cbm-0.12.1/list_projects.paged.meta.json", import.meta.url), "utf8")) as {
+      invocation: string;
+      exit_code: number;
+    };
 
-    await new CbmClient().callTool("list_projects", { limit: 50, offset: 100 });
+    await new CbmClient().callTool("list_projects", { limit: 1, offset: 1 });
 
-    expect(calls[0].args).toEqual(["cli", "--json", "list_projects", "--format", "json", "--limit", "50", "--offset", "100"]);
+    expect(captured.exit_code).toBe(0);
+    expect(calls[0].args.join(" ")).toBe(captured.invocation);
   });
 
   it("keeps a caller-supplied format instead of injecting json", async () => {

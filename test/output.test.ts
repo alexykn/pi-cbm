@@ -37,6 +37,16 @@ describe("compact search_graph output on cbm 0.12 paging", () => {
     expect(String(data.pagination_hint)).toContain("offset=3");
   });
 
+  it("hints the offset that captured page 2 proves cbm honours", async () => {
+    // Requested with limit=3, offset=3: an ignored offset would report next_offset 3, not 6.
+    const page2 = normalizedFixture("search_graph.label-page2") as { results: unknown[]; next_offset: number };
+    const result = await new OutputService().buildCompactableToolResult("Graph search results", page2, {}, { tool: "search_graph" });
+
+    expect(page2.results).toHaveLength(3);
+    expect(page2.next_offset).toBe(6);
+    expect(String((result.details.data as Record<string, unknown>).pagination_hint)).toContain("offset=6");
+  });
+
   it("renders total with a returned/truncated fallback", () => {
     const withTotal = renderResult("search_graph")({ details: { data: { total: 61, has_more: true } } }, undefined, theme);
     expect(withTotal.render(200).join(" ")).toContain("total=61");
