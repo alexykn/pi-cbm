@@ -94,6 +94,21 @@ If the binary is not on `PATH`, set:
 export CODEBASE_MEMORY_MCP_BIN="$HOME/.local/bin/codebase-memory-mcp"
 ```
 
+### Supported versions
+
+This extension requires `codebase-memory-mcp` >= 0.12 and targets the 0.12.x CLI contract (`>=0.12.0 <0.13.0`). Captured/tested versions are 0.12.1 (target) and 0.9.0 (old-shape baseline); 0.10.x and 0.11.x were not tested, and the version gate rejects them conservatively. The 0.9.0 fixtures confirm the older shapes differ (`search_graph` object arrays instead of `cols`/`rows` groups, JSON-only `list_projects`), which this client does not parse; a version with those shapes cannot return useful results.
+
+On startup the extension probes the binary and fails loudly on an unsupported version instead of silently returning empty results:
+
+```text
+codebase-memory-mcp 0.10.0 is unsupported; pi-cbm requires 0.12.x (>=0.12.0 <0.13.0).
+Upgrade codebase-memory-mcp, or reinstall an earlier pi-cbm release (<= 1.2.1) to keep using it.
+```
+
+A newer untested major/minor continues with a one-time warning instead of failing. Set `PI_CBM_SKIP_VERSION_CHECK=1` to skip the probe (useful for packaged/vendored binaries and for tests).
+
+CLI output is normalized before it reaches the tools, so the 0.12 table shapes (`cols`/`rows`, `groups` with `qn_prefix`, `{cols,rows}` label tables, absolute `file` paths, tree-text `list_projects`) are converted to the object arrays and project resolution behavior the rest of the extension expects.
+
 ## Install
 
 ```sh
@@ -124,7 +139,9 @@ Registers:
 - `query_graph`
 - `detect_changes`
 
-Most tools accept optional `project`. When omitted, the extension infers it from indexed project roots matching Pi's current working directory. Agents should omit `project` for cwd/current-project work and provide it only when intentionally querying an external indexed project.
+Most tools accept optional `project`. When omitted, the extension infers it from indexed project roots matching Pi's current working directory. Agents should omit `project` for cwd/current-project work and provide it only when intentionally querying an external indexed project. A `project` value must be an indexed project name or a path (absolute, or relative to the current working directory); an unknown value fails with the indexed project list instead of falling back to a guessed name.
+
+Matching uses the longest indexed root that contains the working directory, so a git worktree or nested checkout that is not indexed itself resolves to the containing repo's graph. Index the worktree separately to query its own graph.
 
 ## Commands
 
@@ -142,6 +159,8 @@ Non-git auto-indexing is disabled by default. Enable it explicitly when working 
 Set `PI_CBM_MAX_CONCURRENT_INDEXES` to configure the machine-wide maximum number of simultaneous repository indexers. It defaults to `1`; use a higher value only when all Pi sessions share the same cache directory and the machine can safely support the additional concurrency.
 
 Set `PI_CBM_AUTO_REFRESH_INTERVAL_MS` to override the background refresh interval in milliseconds. It defaults to `60000` (60 seconds), so single-agent workflows do not have to wait for a long freshness TTL. `PI_CBM_CACHE_DIR` optionally overrides the coordination/cache directory and is forwarded to the upstream CLI as `CBM_CACHE_DIR`.
+
+Set `PI_CBM_FRESH_INDEX_TIMEOUT_MS` to bound how long a tool waits for a stale index to be refreshed before answering from the existing graph. `detect_changes` also re-indexes before diffing; keep this timeout small on large repositories so a first call after a long pause does not block for minutes.
 
 The legacy `CBM_MAX_CONCURRENT_INDEXES`, `CBM_AUTO_REFRESH_INTERVAL_MS`, and `CBM_CACHE_DIR` names remain supported for backwards compatibility. When both names are set, the `PI_CBM_*` value takes precedence.
 
@@ -181,3 +200,13 @@ Give me the architecture overview.
 ```
 
 The extension indexes and periodically refreshes the current repo in the background, so the agent should usually go straight to `get_architecture`, `search_graph`, `get_code_snippet`, `trace_path`, `search_code`, or `query_graph` for structural code exploration. Administrative index operations remain available through the `codebase-memory-mcp` CLI when needed.
+
+## Development
+
+```sh
+npm install
+npm run typecheck
+npm test
+```
+
+Tests read recorded CLI output from `test/fixtures/` instead of running a real binary. To refresh the fixtures after a `codebase-memory-mcp` release, follow `test/fixtures/README.md`: `scripts/capture-fixtures.sh <binary> <version>` indexes a neutral copy of `src/` in a temp directory and records each case's stdout plus a `.meta.json` (invocation, args, exit code, stderr). Adding a new version directory means updating the fixture-driven expectations in the matching `test/*.test.ts` files.

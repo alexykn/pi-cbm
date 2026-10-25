@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json search_graph  # stdin: {\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"name_pattern\":\"callTool\"}",
+  "args_json": "{\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"name_pattern\":\"callTool\"}",
+  "exit_code": 0,
+  "duration_ms": 2237,
+  "stderr": ""
+}

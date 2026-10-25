@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json list_projects '{\"format\":\"json\"}'",
+  "args_json": "{\"format\":\"json\"}",
+  "exit_code": 0,
+  "duration_ms": 2214,
+  "stderr": "warning: passing raw JSON to 'cli list_projects' is deprecated and will be removed in a future release; use flags (run 'cli list_projects --help'), --args-file <path>, or piped stdin.\n"
+}

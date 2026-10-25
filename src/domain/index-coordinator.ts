@@ -29,6 +29,9 @@ export type IndexLease = {
   release(): Promise<void>;
 };
 
+/** `IndexCoordinator.acquire` returns this when another session holds the repo lease. */
+export const INDEX_LEASE_HELD_REASON = "another session is indexing; retry deferred";
+
 export type IndexLeaseResult =
   | { ok: true; lease: IndexLease }
   | { ok: false; reason: string };
@@ -267,16 +270,16 @@ export class IndexCoordinator {
 
       if (controller.signal.aborted) return { ok: false, reason: "indexing was cancelled" };
       if (await this.isLeaseHeld(paths.repoLockPath, paths.processIdentityPath)) {
-        return { ok: false, reason: "another session is indexing; retry deferred" };
+        return { ok: false, reason: INDEX_LEASE_HELD_REASON };
       }
 
       const requestResult = await this.enqueue(paths, key, canonicalPath, controller.signal);
       if (!requestResult) {
         if (controller.signal.aborted) return { ok: false, reason: "indexing was cancelled" };
-        return { ok: false, reason: "another session is indexing; retry deferred" };
+        return { ok: false, reason: INDEX_LEASE_HELD_REASON };
       }
       if (requestResult.kind === "existing") {
-        return { ok: false, reason: "another session is indexing; retry deferred" };
+        return { ok: false, reason: INDEX_LEASE_HELD_REASON };
       }
 
       request = requestResult.request;
@@ -291,7 +294,7 @@ export class IndexCoordinator {
           };
         }
         if (claim?.kind === "skip") {
-          return { ok: false, reason: "another session is indexing; retry deferred" };
+          return { ok: false, reason: INDEX_LEASE_HELD_REASON };
         }
 
         const delay = this.retryDelay(attempt);

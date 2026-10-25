@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json list_projects  # stdin: {\"format\":\"json\"}",
+  "args_json": "{\"format\":\"json\"}",
+  "exit_code": 0,
+  "duration_ms": 28,
+  "stderr": "level=info msg=mem.init budget_mb=2485 total_ram_mb=9943\n"
+}

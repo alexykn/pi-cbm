@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json trace_path  # stdin: {\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"function_name\":\"callTool\",\"mode\":\"calls\",\"depth\":3,\"direction\":\"both\"}",
+  "args_json": "{\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"function_name\":\"callTool\",\"mode\":\"calls\",\"depth\":3,\"direction\":\"both\"}",
+  "exit_code": 0,
+  "duration_ms": 15,
+  "stderr": "level=info msg=mem.init budget_mb=2485 total_ram_mb=9943\n"
+}

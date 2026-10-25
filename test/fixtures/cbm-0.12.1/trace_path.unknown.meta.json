@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json trace_path  # stdin: {\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"function_name\":\"noSuchFunction\",\"mode\":\"calls\",\"depth\":2}",
+  "args_json": "{\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"function_name\":\"noSuchFunction\",\"mode\":\"calls\",\"depth\":2}",
+  "exit_code": 1,
+  "duration_ms": 1961,
+  "stderr": ""
+}

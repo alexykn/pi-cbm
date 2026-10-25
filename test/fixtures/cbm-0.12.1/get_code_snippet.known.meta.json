@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json get_code_snippet  # stdin: {\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"qualified_name\":\"tmp-cbm-fixture-repo.src.cbm.client.CbmClient.callTool\"}",
+  "args_json": "{\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"qualified_name\":\"tmp-cbm-fixture-repo.src.cbm.client.CbmClient.callTool\"}",
+  "exit_code": 0,
+  "duration_ms": 1968,
+  "stderr": ""
+}

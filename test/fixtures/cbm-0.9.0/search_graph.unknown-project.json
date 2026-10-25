@@ -1,0 +1,1 @@
+{"content":[{"type":"text","text":"{\"error\":\"project not found or not indexed\",\"hint\":\"Use list_projects to see all indexed projects, then pass it as the \\\"project\\\" argument.\",\"available_projects\":[\"tmp-cbm-fixture-repo\"],\"count\":1}"}],"isError":true}

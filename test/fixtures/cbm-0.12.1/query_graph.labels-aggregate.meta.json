@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json query_graph  # stdin: {\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"query\":\"MATCH (n) RETURN labels(n), count(n)\"}",
+  "args_json": "{\"format\":\"json\",\"project\":\"tmp-cbm-fixture-repo\",\"query\":\"MATCH (n) RETURN labels(n), count(n)\"}",
+  "exit_code": 0,
+  "duration_ms": 1988,
+  "stderr": ""
+}

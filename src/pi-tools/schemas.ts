@@ -7,7 +7,7 @@ export const SEARCH_CODE_MODE = StringEnum(["compact", "full", "files"] as const
 export const SYMBOL_LABEL = StringEnum(["Function", "Method", "Class", "Variable", "Type", "Route"] as const);
 export const SYMBOL_NEIGHBORS = StringEnum(["none", "callers", "callees", "both"] as const);
 
-export const OPTIONAL_PROJECT = Type.Optional(Type.String({ description: "Indexed project name. If omitted, inferred from the current working directory." }));
+export const OPTIONAL_PROJECT = Type.Optional(Type.String({ description: "Indexed project name, or the repo's absolute path. Required when the cwd is outside the repo; otherwise inferred from the cwd." }));
 export const TIMEOUT_MS = Type.Optional(Type.Number({ description: "Timeout in milliseconds for this codebase-memory-mcp CLI call." }));
 export const FULL_OUTPUT = Type.Optional(
   Type.Boolean({
