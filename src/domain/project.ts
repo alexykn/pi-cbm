@@ -92,6 +92,11 @@ function isAbsolutePath(value: string): boolean {
   return value.startsWith("/") || /^[a-z]:[\\/]/i.test(value);
 }
 
+/** Absolute, or explicitly relative ("." / ".." / containing a separator). */
+function looksLikePath(value: string): boolean {
+  return isAbsolutePath(value) || value === "." || value === ".." || /[\\/]/.test(value);
+}
+
 function waitForLease(ms: number, signal?: AbortSignal): Promise<boolean> {
   if (signal?.aborted) return Promise.resolve(false);
   return new Promise((resolvePromise) => {
@@ -268,6 +273,8 @@ export class ProjectService {
   private async tryResolveProject(given: string, cwd: string, projects: CbmProject[], signal?: AbortSignal): Promise<string | undefined> {
     if (given) {
       if (projects.some((project) => project.name === given)) return given;
+      // A bare word is a project name, never a cwd-relative path: "other-repo" must not resolve to the cwd's project.
+      if (!looksLikePath(given)) return undefined;
       const path = isAbsolutePath(given) ? given : resolve(cwd, given);
       return (await this.matchProject(projects, [path]))?.name;
     }

@@ -80,8 +80,18 @@ describe("ProjectService.resolveProject", () => {
     await expect(service.resolveProject("/work/repo/", "/home/user")).resolves.toBe("repo");
   });
 
-  it("resolves a relative path against the cwd", async () => {
-    await expect(serviceWith().service.resolveProject(".", "/work/repo/src")).resolves.toBe("repo");
+  it("resolves an explicitly relative path against the cwd", async () => {
+    const { service } = serviceWith();
+
+    await expect(service.resolveProject(".", "/work/repo/src")).resolves.toBe("repo");
+    await expect(service.resolveProject("./src", "/work/repo")).resolves.toBe("repo");
+    await expect(service.resolveProject("..", "/work/repo/src")).resolves.toBe("repo");
+  });
+
+  it("rejects an unknown bare name even when the cwd is inside another indexed project", async () => {
+    const { service } = serviceWith({ list: () => okPage([{ name: "my-repo", root_path: "/work/my-repo" }]), gitRoot: "/work/my-repo" });
+
+    await expect(service.resolveProject("other-repo", "/work/my-repo/src")).rejects.toThrow(/given value "other-repo"/);
   });
 
   it("rejects an unknown project name with the actionable list, not symbol-not-found", async () => {
