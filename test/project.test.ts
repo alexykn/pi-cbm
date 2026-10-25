@@ -38,6 +38,8 @@ function serviceWith(options: Fake = {}) {
   const listArgs: Array<Record<string, unknown>> = [];
   const coordinator = {
     acquire: async () => ({ ok: true, lease: { signal: new AbortController().signal, release: async () => {} } }),
+    readIndexRecord: async () => undefined,
+    writeIndexRecord: async () => {},
   } as unknown as IndexCoordinator;
   const cbm = {
     callTool: async (tool: string, args: Record<string, unknown>): Promise<CbmCallResult> => {
@@ -269,7 +271,8 @@ describe("project resolution", () => {
     await expect(stale).resolves.toEqual([]);
 
     await expect(catalog.list()).resolves.toEqual([{ name: "repo", root_path: "/work/repo" }]);
-    expect(listArgs).toHaveLength(2);
+    // The raced fetch, the auto-index's own project lookup, and the refetch after the index.
+    expect(listArgs).toHaveLength(3);
   });
 
   it("resolves a symlinked cwd through realpath", async () => {

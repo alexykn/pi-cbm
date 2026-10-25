@@ -45,9 +45,11 @@ function coerceQueryGraphMetrics(data: CbmData): CbmData {
 }
 
 function freshnessLine(freshness: IndexFreshness): string {
-  return freshness.refreshed
-    ? `index refreshed ${Math.round(freshness.age_ms / 1000)} s ago`
-    : `graph may be stale: ${freshness.reason}`;
+  if (!freshness.fresh) return `stale: ${freshness.reason}`;
+  const seconds = Math.round(freshness.age_ms / 1000);
+  return freshness.reindexed
+    ? `fresh: re-indexed, graph taken ${seconds} s ago`
+    : `fresh: no changes since the graph was taken ${seconds} s ago`;
 }
 
 function withIndexFreshness(data: CbmData, freshness: IndexFreshness): CbmData {

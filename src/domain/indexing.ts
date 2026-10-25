@@ -2,20 +2,21 @@ import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { CbmClient } from "../cbm/client.js";
 import { indexTimeoutMs } from "../cbm/timeouts.js";
+import { awaitWithSignal } from "../shared/concurrency.js";
 import { cbmEnvPositiveInt } from "../shared/env.js";
+import { isRecord, removeUndefined } from "../shared/object.js";
 import { normalizePathKey } from "../shared/paths.js";
 import { validateAutoIndexPath } from "./auto-index-paths.js";
-import { INDEX_LEASE_HELD_REASON, type IndexCoordinator, type IndexLeaseResult } from "./index-coordinator.js";
+import { INDEX_LEASE_HELD_REASON, waitForRetry, type IndexCoordinator, type IndexLease, type IndexRecord } from "./index-coordinator.js";
 import type { ProjectCatalog } from "./project-catalog.js";
 import type { ToolExecutionContext } from "./project-resolver.js";
+import { CHANGE_SLACK_MS, isUnchangedSince, newestChangeMs } from "./worktree-changes.js";
 
 const AUTO_INDEX_MODE = "full";
-
-/** `detect_changes` re-indexes at most once per window; a graph this fresh is current enough. */
-const INDEX_FRESH_WINDOW_MS = 5_000;
 const LEASE_WAIT_RETRY_MS = 500;
+const DETECT_CHANGES_CANCELLED = "codebase-memory-mcp detect_changes cancelled";
 
-/** Budget for the whole forced `detect_changes` refresh: lease wait plus the index call. */
+/** How long `detect_changes` waits for the lease plus the re-index before answering from the existing graph. */
 const DEFAULT_FRESH_INDEX_TIMEOUT_MS = 30_000;
 
 function resolveFreshIndexTimeoutMs(): number {
@@ -31,13 +32,20 @@ export type IndexResult =
       data: Record<string, unknown>;
     }
   | {
+      /** Nothing changed since the graph was taken, so no index ran. */
+      status: "fresh";
+      project: string;
+      age_ms: number;
+    }
+  | {
       status: "skipped";
       reason: string;
     };
 
+/** `age_ms` is the time since the graph was taken. */
 export type IndexFreshness =
-  | { refreshed: true; age_ms: number }
-  | { refreshed: false; reason: string };
+  | { fresh: true; reindexed: boolean; age_ms: number }
+  | { fresh: false; reason: string };
 
 export type AutoIndexSettings = {
   readonly autoIndexNonGitDirectories: boolean;
@@ -47,42 +55,38 @@ type AutoIndexTarget =
   | { ok: true; path: string; source: "git-root" | "cwd" }
   | { ok: false; reason: string };
 
-function waitForLease(ms: number, signal?: AbortSignal): Promise<boolean> {
-  if (signal?.aborted) return Promise.resolve(false);
-  return new Promise((resolvePromise) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      resolvePromise(false);
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolvePromise(true);
-    }, ms);
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
+/** `reference` is when the current graph was taken, when known. */
+type FreshnessCheck = { fresh: true; reference: number } | { fresh: false; reference?: number };
+
+type RefreshProgress = { reference?: number; queuedAt: number; indexingSince?: number };
+
+type Refresh = { progress: RefreshProgress; result: Promise<IndexFreshness> };
+
+type RefreshLease = { ok: true; lease: IndexLease; waited: boolean } | { ok: false; reason: string };
+
+const isoSeconds = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
-/** Bound a forced refresh by `timeoutMs` while still honouring a user/session abort. */
-function boundedSignal(parent: AbortSignal | undefined, timeoutMs: number): { signal: AbortSignal; cleanup: () => void } {
-  const controller = new AbortController();
-  const onParentAbort = () => controller.abort();
-  if (parent?.aborted) controller.abort();
-  else parent?.addEventListener("abort", onParentAbort, { once: true });
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  timer.unref?.();
-  return {
-    signal: controller.signal,
-    cleanup: () => {
-      clearTimeout(timer);
-      parent?.removeEventListener("abort", onParentAbort);
-    },
-  };
+function missingChanges(reference: number | undefined): string {
+  return reference === undefined ? "the graph's age is unknown" : `changes after ${isoSeconds(reference)} may be missing`;
+}
+
+/**
+ * When the current graph was taken: the start of pi-cbm's own index while that
+ * is the latest one (the start catches edits made during it), otherwise cbm's
+ * `indexed_at`, the completion of an index by another client.
+ */
+function graphReference(record: IndexRecord | undefined, indexedAt: number | undefined): number | undefined {
+  if (record && (indexedAt === undefined || record.finishedAt >= indexedAt - CHANGE_SLACK_MS)) return record.startedAt;
+  return indexedAt;
 }
 
 /** Background indexing of the session repo and the `detect_changes` freshness refresh. */
 export class IndexingService {
-  private readonly lastIndexFinishedAt = new Map<string, number>();
-  private readonly inflightIndexes = new Map<string, Promise<IndexFreshness>>();
+  private readonly refreshes = new Map<string, Refresh>();
 
   constructor(
     private readonly cbm: CbmClient,
@@ -108,112 +112,200 @@ export class IndexingService {
     return { ok: true, path: validation.path, source: "cwd" };
   }
 
-  async indexCurrentRepo(
-    cwd: string,
-    signal?: AbortSignal,
-    options: { waitForLeaseMs?: number; indexTimeoutMs?: number } = {},
-  ): Promise<IndexResult> {
+  /** The session-start and auto-refresh index: skipped while nothing changed since the graph was taken. */
+  async indexCurrentRepo(cwd: string, signal?: AbortSignal): Promise<IndexResult> {
     const target = await this.autoIndexTarget(cwd, signal);
     if (!target.ok) {
       return { status: "skipped", reason: target.reason };
     }
-    return this.indexPath(target.path, signal, options);
+    const project = await this.projectAt(target.path, signal);
+    if (project) {
+      const check = await this.checkFreshness(project, target.path, signal);
+      if (check.fresh) return { status: "fresh", project, age_ms: Date.now() - check.reference };
+    }
+    return this.indexPath(target.path, project, signal);
   }
 
-  /** Index an exact path (no git-root re-resolution); the `detect_changes` freshness path uses it. */
-  private async indexPath(
-    path: string,
-    signal: AbortSignal | undefined,
-    options: { waitForLeaseMs?: number; indexTimeoutMs?: number } = {},
-  ): Promise<IndexResult> {
+  /**
+   * Bring `project`'s graph up to date before `detect_changes`. CLI-mode cbm
+   * indexes are not watched, so a stale graph silently omits impacted symbols
+   * after an edit. Answers without indexing when nothing changed since the
+   * graph was taken; otherwise waits up to the fresh-index timeout for a
+   * re-index, which keeps running in the background past that timeout.
+   */
+  async ensureFreshIndex(project: string, ctx: ToolExecutionContext): Promise<IndexFreshness> {
+    const root = await this.indexableProjectRoot(project, ctx.signal);
+    if (!root) return { fresh: false, reason: "project root not found on disk; index not refreshed" };
+
+    const key = `${project}\0${normalizePathKey(resolve(root))}`;
+    let refresh = this.refreshes.get(key);
+    if (!refresh) {
+      const check = await this.checkFreshness(project, root, ctx.signal);
+      if (check.fresh) return { fresh: true, reindexed: false, age_ms: Date.now() - check.reference };
+      refresh = this.refreshes.get(key) ?? this.startRefresh(key, project, root, check.reference);
+    }
+    return this.awaitRefresh(refresh, ctx.signal);
+  }
+
+  /** Index an exact path through the coordinator lease; skipped when another session holds it. */
+  private async indexPath(path: string, project: string | undefined, signal: AbortSignal | undefined): Promise<IndexResult> {
     const validation = validateAutoIndexPath(path);
     if (!validation.ok) {
       return { status: "skipped", reason: validation.reason };
     }
 
-    const coordination = await this.acquireIndexLease(validation.path, signal, options.waitForLeaseMs);
+    const coordination = await this.indexCoordinator.acquire(validation.path, signal);
     if (!coordination.ok) {
       return { status: "skipped", reason: coordination.reason };
     }
-
     try {
-      const result = await this.cbm.callTool(
-        "index_repository",
-        { repo_path: validation.path, mode: AUTO_INDEX_MODE },
-        { signal: coordination.lease.signal, timeoutMs: indexTimeoutMs(options.indexTimeoutMs) },
-      );
-      const data = result.data && typeof result.data === "object" ? (result.data as Record<string, unknown>) : {};
-      this.lastIndexFinishedAt.set(this.indexKey(validation.path), Date.now());
-      this.catalog.invalidate();
-      return {
-        status: "indexed",
-        project: typeof data.project === "string" ? data.project : "ready",
-        nodes: typeof data.nodes === "number" ? data.nodes : undefined,
-        edges: typeof data.edges === "number" ? data.edges : undefined,
-        data,
-      };
+      return await this.runIndex(validation.path, project, coordination.lease);
     } finally {
       await coordination.lease.release();
     }
   }
 
-  /** A held repo lease means another session is already indexing; wait for it instead of skipping. */
-  private async acquireIndexLease(repoPath: string, signal: AbortSignal | undefined, waitForLeaseMs: number | undefined): Promise<IndexLeaseResult> {
-    const deadline = waitForLeaseMs === undefined ? undefined : Date.now() + waitForLeaseMs;
-    let coordination = await this.indexCoordinator.acquire(repoPath, signal);
-    while (
-      !coordination.ok &&
-      coordination.reason === INDEX_LEASE_HELD_REASON &&
-      deadline !== undefined &&
-      Date.now() < deadline &&
-      !signal?.aborted
-    ) {
-      if (!(await waitForLease(Math.min(LEASE_WAIT_RETRY_MS, deadline - Date.now()), signal))) break;
-      coordination = await this.indexCoordinator.acquire(repoPath, signal);
+  /**
+   * Run `index_repository` under `lease` and record when it ran. `name` keeps the
+   * target unambiguous when several projects share a root; without a known
+   * project cbm picks the path-derived one.
+   */
+  private async runIndex(root: string, project: string | undefined, lease: IndexLease): Promise<Extract<IndexResult, { status: "indexed" }>> {
+    const startedAt = Date.now();
+    const result = await this.cbm.callTool(
+      "index_repository",
+      removeUndefined({ repo_path: root, mode: AUTO_INDEX_MODE, name: project }),
+      { signal: lease.signal, timeoutMs: indexTimeoutMs(undefined) },
+    );
+    const finishedAt = Date.now();
+    const data = isRecord(result.data) ? result.data : {};
+    const indexed = typeof data.project === "string" ? data.project : project;
+    this.catalog.invalidate();
+    // Written before the lease is released, so a session waiting on the lease re-checks against it.
+    // Without a record freshness falls back to cbm's indexed_at, so a failed write is not an index failure.
+    if (indexed) await this.indexCoordinator.writeIndexRecord({ project: indexed, root, startedAt, finishedAt }).catch(() => undefined);
+    return {
+      status: "indexed",
+      project: indexed ?? "ready",
+      nodes: typeof data.nodes === "number" ? data.nodes : undefined,
+      edges: typeof data.edges === "number" ? data.edges : undefined,
+      data,
+    };
+  }
+
+  /** Has anything under `root` changed since `project`'s graph was taken? Unknown counts as changed. */
+  private async checkFreshness(project: string, root: string, signal?: AbortSignal): Promise<FreshnessCheck> {
+    const record = await this.readRecord(project, root);
+    const newest = await newestChangeMs(root, signal);
+    if (newest === undefined) return { fresh: false, reference: record?.startedAt };
+    // graphReference is never earlier than the record's start, so unchanged since the start means fresh,
+    // without the cost of an index_status call (one cbm process, about a second).
+    if (record && isUnchangedSince(newest, record.startedAt)) return { fresh: true, reference: record.startedAt };
+
+    const reference = graphReference(record, await this.indexedAt(project, signal));
+    if (reference !== undefined && isUnchangedSince(newest, reference)) return { fresh: true, reference };
+    return { fresh: false, reference };
+  }
+
+  private async readRecord(project: string, root: string): Promise<IndexRecord | undefined> {
+    const record = await this.indexCoordinator.readIndexRecord(project).catch(() => undefined);
+    return record && normalizePathKey(resolve(record.root)) === normalizePathKey(resolve(root)) ? record : undefined;
+  }
+
+  /** cbm's completion time for `project`'s last index, by any client, to the second. */
+  private async indexedAt(project: string, signal?: AbortSignal): Promise<number | undefined> {
+    try {
+      const result = await this.cbm.callTool("index_status", { project }, { signal, allowError: true });
+      const indexedAt = isRecord(result.data) && typeof result.data.indexed_at === "string" ? Date.parse(result.data.indexed_at) : Number.NaN;
+      return Number.isFinite(indexedAt) ? indexedAt : undefined;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      return undefined;
     }
-    return coordination;
+  }
+
+  private async projectAt(root: string, signal?: AbortSignal): Promise<string | undefined> {
+    try {
+      return await this.catalog.projectAt(root, signal);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      return undefined;
+    }
+  }
+
+  /** One refresh per project at a time; it runs without any caller's signal so it can outlive their waits. */
+  private startRefresh(key: string, project: string, root: string, reference: number | undefined): Refresh {
+    const progress: RefreshProgress = { reference, queuedAt: Date.now() };
+    const refresh: Refresh = {
+      progress,
+      result: this.refresh(project, root, progress).finally(() => {
+        if (this.refreshes.get(key) === refresh) this.refreshes.delete(key);
+      }),
+    };
+    this.refreshes.set(key, refresh);
+    return refresh;
+  }
+
+  /** A caller abort rethrows; the timeout answers stale. Neither stops the refresh. */
+  private async awaitRefresh(refresh: Refresh, signal: AbortSignal | undefined): Promise<IndexFreshness> {
+    const deadline = AbortSignal.timeout(resolveFreshIndexTimeoutMs());
+    try {
+      return await awaitWithSignal(refresh.result, signal ? AbortSignal.any([signal, deadline]) : deadline, DETECT_CHANGES_CANCELLED);
+    } catch (error) {
+      if (signal?.aborted || !deadline.aborted) throw error;
+      const { indexingSince, queuedAt, reference } = refresh.progress;
+      const running = indexingSince === undefined ? `re-index queued since ${isoSeconds(queuedAt)}` : `re-index running since ${isoSeconds(indexingSince)}`;
+      return { fresh: false, reason: `${running}; ${missingChanges(reference)}` };
+    }
+  }
+
+  /** Never rejects: a failure answers from the existing graph. */
+  private async refresh(project: string, root: string, progress: RefreshProgress): Promise<IndexFreshness> {
+    const stale = (reason: string): IndexFreshness => ({ fresh: false, reason: `${reason}; ${missingChanges(progress.reference)}` });
+    const validation = validateAutoIndexPath(root);
+    if (!validation.ok) return stale(`index not refreshed: ${validation.reason}`);
+    try {
+      const acquired = await this.acquireForRefresh(validation.path);
+      if (!acquired.ok) return stale(`index not refreshed: ${acquired.reason}`);
+      try {
+        // Another index held the lease; it may already cover the changes.
+        if (acquired.waited) {
+          const check = await this.checkFreshness(project, root);
+          if (check.fresh) return { fresh: true, reindexed: false, age_ms: Date.now() - check.reference };
+          progress.reference = check.reference;
+        }
+        const indexingSince = Date.now();
+        progress.indexingSince = indexingSince;
+        await this.runIndex(validation.path, project, acquired.lease);
+        return { fresh: true, reindexed: true, age_ms: Date.now() - indexingSince };
+      } finally {
+        await acquired.lease.release();
+      }
+    } catch (error) {
+      return stale(`index refresh failed: ${errorMessage(error, "index failed")}`);
+    }
   }
 
   /**
-   * Force a re-index before `detect_changes` unless this project's root was
-   * indexed within the freshness window. CLI-mode cbm indexes are not watched,
-   * so a stale graph silently omits impacted symbols after an edit.
+   * Take the repo lease, waiting while another session (or this one's
+   * auto-refresh) holds it. Only the wait is bounded, by the index timeout:
+   * once the lease is ours the index runs to completion or to that timeout.
    */
-  async ensureFreshIndex(project: string, ctx: ToolExecutionContext): Promise<IndexFreshness> {
-    const root = await this.indexableProjectRoot(project, ctx.signal);
-    if (!root) return { refreshed: false, reason: "project root not found on disk; index not refreshed" };
-
-    const age = this.indexAgeMs(root);
-    if (age !== undefined && age < INDEX_FRESH_WINDOW_MS) return { refreshed: true, age_ms: age };
-
-    const key = this.indexKey(root);
-    const existing = this.inflightIndexes.get(key);
-    if (existing) return existing;
-
-    const run = this.refreshIndex(root, ctx).finally(() => {
-      if (this.inflightIndexes.get(key) === run) this.inflightIndexes.delete(key);
-    });
-    this.inflightIndexes.set(key, run);
-    return run;
-  }
-
-  private async refreshIndex(root: string, ctx: ToolExecutionContext): Promise<IndexFreshness> {
-    const timeoutMs = resolveFreshIndexTimeoutMs();
-    const bounded = boundedSignal(ctx.signal, timeoutMs);
-    const timedOutReason = () => `timed out after ${Math.max(1, Math.round(timeoutMs / 1000))} s waiting for index`;
+  private async acquireForRefresh(root: string): Promise<RefreshLease> {
+    const waiting = new AbortController();
+    const giveUp = setTimeout(() => waiting.abort(), indexTimeoutMs(undefined));
+    giveUp.unref?.();
+    let waited = false;
     try {
-      const result = await this.indexPath(root, bounded.signal, { waitForLeaseMs: timeoutMs, indexTimeoutMs: timeoutMs });
-      if (ctx.signal?.aborted) throw new Error("codebase-memory-mcp detect_changes cancelled");
-      if (result.status !== "indexed") {
-        return { refreshed: false, reason: bounded.signal.aborted ? timedOutReason() : result.reason };
+      for (;;) {
+        const coordination = await this.indexCoordinator.acquire(root, waiting.signal);
+        if (coordination.ok) return { ok: true, lease: coordination.lease, waited };
+        if (coordination.reason !== INDEX_LEASE_HELD_REASON) return coordination;
+        waited = true;
+        if (!(await waitForRetry(LEASE_WAIT_RETRY_MS, waiting.signal))) return { ok: false, reason: "gave up waiting for another index" };
       }
-      return { refreshed: true, age_ms: this.indexAgeMs(root) ?? 0 };
-    } catch (error) {
-      if (ctx.signal?.aborted) throw error;
-      if (bounded.signal.aborted) return { refreshed: false, reason: timedOutReason() };
-      return { refreshed: false, reason: error instanceof Error && error.message ? error.message : "index failed" };
     } finally {
-      bounded.cleanup();
+      clearTimeout(giveUp);
     }
   }
 
@@ -227,14 +319,5 @@ export class IndexingService {
     } catch {
       return undefined;
     }
-  }
-
-  private indexAgeMs(root: string): number | undefined {
-    const finishedAt = this.lastIndexFinishedAt.get(this.indexKey(root));
-    return finishedAt === undefined ? undefined : Date.now() - finishedAt;
-  }
-
-  private indexKey(path: string): string {
-    return normalizePathKey(resolve(path));
   }
 }

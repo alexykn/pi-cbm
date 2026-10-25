@@ -61,6 +61,10 @@ export function registerLifecycle(pi: ExtensionAPI, services: CbmServices) {
         session.ui.setStatus("codebase-memory", `cbm skipped: ${result.reason}`);
         return;
       }
+      if (result.status === "fresh") {
+        session.ui.setStatus("codebase-memory", `cbm ${result.project} · up to date`);
+        return;
+      }
 
       const nodes = typeof result.nodes === "number" ? ` · ${result.nodes} nodes` : "";
       const edges = typeof result.edges === "number" ? ` · ${result.edges} edges` : "";
