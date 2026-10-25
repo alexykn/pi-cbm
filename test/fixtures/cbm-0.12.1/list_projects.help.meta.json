@@ -1,0 +1,7 @@
+{
+  "invocation": "codebase-memory-mcp cli list_projects --help",
+  "args_json": "",
+  "exit_code": 0,
+  "duration_ms": 9,
+  "stderr": ""
+}

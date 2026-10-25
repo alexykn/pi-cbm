@@ -1,9 +1,13 @@
 import { spawn } from "node:child_process";
+import { awaitWithSignal } from "../shared/concurrency.js";
+import { cbmEnvFlag } from "../shared/env.js";
 
 /** Range this extension is tested against. */
 export const SUPPORTED_CBM_VERSION_RANGE = ">=0.12.0 <0.13.0";
 
 const VERSION_PROBE_TIMEOUT_MS = 15_000;
+/** A probe that could not run (spawn error, timeout) is retried after this long instead of on every call. */
+const UNKNOWN_VERSION_TTL_MS = 60_000;
 const UNPARSEABLE_WARNING =
   "Could not determine the codebase-memory-mcp version; continuing without a compatibility guarantee.";
 
@@ -18,14 +22,10 @@ export type CbmVersionCheck = {
   message?: string;
 };
 
-const versionChecks = new Map<string, Promise<CbmVersionCheck>>();
-let pendingWarning: string | undefined;
-let detectedVersion: string | undefined;
+/** A compatibility message for the user: a too-old binary is an error, anything uncertain a warning. */
+export type CbmVersionNotice = { level: "error" | "warning"; message: string };
 
-/** Last version string seen by a probe, for contract-error messages. */
-export function detectedCbmVersion(): string {
-  return detectedVersion ?? "unknown";
-}
+type VersionProbe = { check: Promise<CbmVersionCheck>; expiresAt?: number };
 
 export function parseCbmVersion(output: string): CbmVersion | undefined {
   const match = /codebase-memory-mcp\s+v?(\d+)\.(\d+)\.(\d+)/.exec(output);
@@ -51,29 +51,51 @@ export function evaluateCbmVersion(version: CbmVersion | undefined): CbmVersionC
   };
 }
 
-/** Probe once per resolved binary path; every later call reuses the promise. */
-export function checkCbmVersion(binaryPath: string): Promise<CbmVersionCheck> {
-  if (process.env.PI_CBM_SKIP_VERSION_CHECK === "1") return Promise.resolve({ status: "ok" });
-
-  let check = versionChecks.get(binaryPath);
-  if (!check) {
-    check = probeCbmVersion(binaryPath).then(({ check: result, retryable }) => {
-      // Only cache definitive answers; a spawn error or timeout gets one retry per call.
-      if (retryable) versionChecks.delete(binaryPath);
-      if (result.version) detectedVersion = result.version;
-      if (result.warning && !pendingWarning) pendingWarning = result.warning;
-      return result;
-    });
-    versionChecks.set(binaryPath, check);
-  }
-  return check;
+function noticeFor(check: CbmVersionCheck): CbmVersionNotice | undefined {
+  if (check.status === "too-old" && check.message) return { level: "error", message: check.message };
+  if (check.warning) return { level: "warning", message: check.warning };
+  return undefined;
 }
 
-/** Returns the one-time compatibility warning, if any (consumed by the status line). */
-export function consumeCbmVersionWarning(): string | undefined {
-  const warning = pendingWarning;
-  pendingWarning = undefined;
-  return warning;
+/** One `--version` probe per binary path, with each compatibility notice handed out once. */
+export class CbmVersionGate {
+  private readonly probes = new Map<string, VersionProbe>();
+  private readonly noticed = new Set<string>();
+  private pending: CbmVersionNotice[] = [];
+
+  check(binaryPath: string, signal?: AbortSignal): Promise<CbmVersionCheck> {
+    if (cbmEnvFlag("SKIP_VERSION_CHECK")) return Promise.resolve({ status: "ok" });
+
+    const cached = this.probes.get(binaryPath);
+    if (cached && (cached.expiresAt === undefined || Date.now() < cached.expiresAt)) {
+      return awaitWithSignal(cached.check, signal, "codebase-memory-mcp version check cancelled");
+    }
+
+    const probe: VersionProbe = {
+      // The shared probe runs unsignalled; an aborting caller only stops waiting for it.
+      check: probeCbmVersion(binaryPath).then(({ check, retryable }) => {
+        if (retryable) probe.expiresAt = Date.now() + UNKNOWN_VERSION_TTL_MS;
+        this.record(check);
+        return check;
+      }),
+    };
+    this.probes.set(binaryPath, probe);
+    return awaitWithSignal(probe.check, signal, "codebase-memory-mcp version check cancelled");
+  }
+
+  /** Notices not yet shown to the user; each distinct message is returned only once. */
+  takeNotices(): CbmVersionNotice[] {
+    const notices = this.pending;
+    this.pending = [];
+    return notices;
+  }
+
+  private record(check: CbmVersionCheck): void {
+    const notice = noticeFor(check);
+    if (!notice || this.noticed.has(notice.message)) return;
+    this.noticed.add(notice.message);
+    this.pending.push(notice);
+  }
 }
 
 function probeCbmVersion(binaryPath: string): Promise<{ check: CbmVersionCheck; retryable: boolean }> {
@@ -91,8 +113,9 @@ function probeCbmVersion(binaryPath: string): Promise<{ check: CbmVersionCheck; 
     const child = spawn(binaryPath, ["--version"], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     timer = setTimeout(() => {
       child.kill("SIGTERM");
-      finish({ status: "unknown", warning: UNPARSEABLE_WARNING }, true);
+      finish(evaluateCbmVersion(undefined), true);
     }, VERSION_PROBE_TIMEOUT_MS);
+    timer.unref?.();
 
     child.stdout?.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");

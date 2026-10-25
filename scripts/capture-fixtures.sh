@@ -7,8 +7,10 @@
 #   <tool>.<case>.json        raw stdout, verbatim (JSON envelope, or tree text)
 #   <tool>.<case>.meta.json   { invocation, args_json, exit_code, duration_ms, stderr }
 #
-# The cache is always an isolated temp dir, so the user's real cbm cache and
-# ~/.cache are never touched.
+# Everything else lives in one fresh `mktemp -d` work dir that is removed on
+# exit: the cbm cache (so the user's real cache and ~/.cache are never touched)
+# and the fixture repos, which are built from a copy of this repo's src/. No
+# existing checkout is ever read, reset, or modified.
 set -euo pipefail
 
 BIN=${1:-}
@@ -21,24 +23,32 @@ BIN=$(readlink -f "$BIN")
 [[ -x $BIN ]] || { echo "not an executable: $BIN" >&2; exit 2; }
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-FIXTURE_REPO=${CBM_FIXTURE_REPO:-/tmp/cbm-fixture-repo}
 OUT="$ROOT/test/fixtures/cbm-$VER"
 
-if [[ ! -d $FIXTURE_REPO/.git ]]; then
-  cat >&2 <<EOF
-fixture repo missing: $FIXTURE_REPO
-create it with:
-  rm -rf $FIXTURE_REPO && mkdir -p $FIXTURE_REPO
-  cp -r $ROOT/src $FIXTURE_REPO/src
-  git -C $FIXTURE_REPO init -q && git -C $FIXTURE_REPO add -A
-  git -C $FIXTURE_REPO -c user.email=fixture@example.com -c user.name=fixture commit -qm fixture
-EOF
-  exit 2
-fi
-
-CACHE=$(mktemp -d "/tmp/cbm-capture-$VER-XXXXXX")
+# Under /tmp rather than $TMPDIR so captured root paths stay short and neutral.
+WORK=$(mktemp -d "/tmp/cbm-capture-$VER-XXXXXX")
+# cbm 0.12 can still write cache/activity.db just after a call returns, so remove twice.
+cleanup() {
+  rm -rf "$WORK"
+  sleep 1
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
+CACHE="$WORK/cache"
+FIXTURE_REPO="$WORK/cbm-fixture-repo"
 export CBM_CACHE_DIR=$CACHE
 mkdir -p "$CACHE"
+
+# make_repo <dir> <source dir>: a one-commit git repo holding a copy of <source dir> as src/.
+make_repo() {
+  mkdir -p "$1"
+  cp -R "$2" "$1/src"
+  git -C "$1" init -q
+  git -C "$1" add -A
+  git -C "$1" -c user.email=fixture@example.com -c user.name=fixture commit -qm fixture
+}
+make_repo "$FIXTURE_REPO" "$ROOT/src"
+
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
@@ -90,27 +100,44 @@ capture_argv() {
     "$BIN" cli --json "$tool" "$args"
 }
 
+# capture_flags <name> <args...> -- `cli --json <args...>`, as the client calls list_projects.
+capture_flags() {
+  local name=$1
+  shift
+  _record "$name" "cli --json $*" "" "$BIN" cli --json "$@"
+}
+
 # capture_raw <name> <args...> -- exact invocation, no --json wrapper.
 capture_raw() {
   local name=$1
   shift
-  _record "$name" "$BIN $*" "" "$BIN" "$@"
+  _record "$name" "codebase-memory-mcp $*" "" "$BIN" "$@"
+}
+
+# index <repo> [name] -- index silently (setup for a later case, not a case itself).
+index() {
+  local args="{\"format\":\"json\",\"repo_path\":\"$1\",\"mode\":\"full\"${2:+,\"name\":\"$2\"}}"
+  printf '%s' "$args" | "$BIN" cli --json index_repository >/dev/null
 }
 
 echo "capturing cbm $VER from $BIN" >&2
-echo "fixture repo $FIXTURE_REPO, cache $CACHE" >&2
-
-git -C "$FIXTURE_REPO" checkout -- . 2>/dev/null || true
+echo "work dir $WORK" >&2
 
 # --- version -----------------------------------------------------------------
 capture_raw version.long-flag --version
 
 # --- index (must run first) --------------------------------------------------
-IDX="{\"format\":\"json\",\"repo_path\":\"$FIXTURE_REPO\",\"mode\":\"full\"}"
+# 0.12 takes an explicit name, so the project (and every qn prefix) stays
+# tmp-cbm-fixture-repo although the repo now lives in a random temp dir.
+# 0.9.0 has no `name` and derives the project from the path instead.
+if is_012; then
+  IDX="{\"format\":\"json\",\"repo_path\":\"$FIXTURE_REPO\",\"mode\":\"full\",\"name\":\"tmp-cbm-fixture-repo\"}"
+else
+  IDX="{\"format\":\"json\",\"repo_path\":\"$FIXTURE_REPO\",\"mode\":\"full\"}"
+fi
 capture index_repository first "$IDX"
 capture index_repository second "$IDX"
 
-# cbm names a project from its absolute path (leading / dropped, / -> -).
 PROJECT=$(node -e '
   const fs = require("fs");
   const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -134,8 +161,8 @@ capture list_projects tree "{}"
 capture list_projects stdin-format-ignored "{\"format\":\"json\"}"
 capture_argv list_projects inline-args "{\"format\":\"json\"}"
 if is_012; then
-  _record list_projects.format-flag "cli --json list_projects --format json" "" \
-    "$BIN" cli --json list_projects --format json
+  capture_flags list_projects.format-flag list_projects --format json
+  capture_raw list_projects.help cli list_projects --help
 fi
 
 # --- search_graph ------------------------------------------------------------
@@ -144,6 +171,8 @@ capture search_graph query "{\"format\":\"json\",\"project\":\"$PROJECT\",\"quer
 capture search_graph qn-pattern "{\"format\":\"json\",\"project\":\"$PROJECT\",\"qn_pattern\":\".*client.*CbmClient.*\",\"limit\":5}"
 capture search_graph label "{\"format\":\"json\",\"project\":\"$PROJECT\",\"label\":\"Method\",\"limit\":3}"
 if is_012; then
+  # Page 2 of the `label` case: proves `offset` is honoured and `next_offset` advances.
+  capture search_graph label-page2 "{\"format\":\"json\",\"project\":\"$PROJECT\",\"label\":\"Method\",\"limit\":3,\"offset\":3}"
   capture search_graph fields "{\"format\":\"json\",\"project\":\"$PROJECT\",\"name_pattern\":\"callTool\",\"fields\":[\"signature\",\"parent_class\",\"start_line\",\"end_line\"]}"
 fi
 capture search_graph unknown-project "{\"format\":\"json\",\"project\":\"no-such-project\",\"name_pattern\":\"callTool\"}"
@@ -166,8 +195,21 @@ capture get_graph_schema default "{\"format\":\"json\",\"project\":\"$PROJECT\"}
 capture query_graph labels-aggregate "{\"format\":\"json\",\"project\":\"$PROJECT\",\"query\":\"MATCH (n) RETURN labels(n), count(n)\"}"
 capture query_graph projection "{\"format\":\"json\",\"project\":\"$PROJECT\",\"query\":\"MATCH (f:Function) RETURN f.name, f.file_path LIMIT 3\"}"
 
-# detect_changes needs a dirty worktree, so it runs last.
+# detect_changes needs a dirty worktree, so it runs after the read-only cases.
 printf '\n// capture-fixtures marker\n' >>"$FIXTURE_REPO/src/shared/strings.ts"
 capture detect_changes dirty "{\"format\":\"json\",\"project\":\"$PROJECT\"}"
+
+# --- several projects (last: earlier cases list one project) -----------------
+if is_012; then
+  # One root under two names: indexed by default (derived name) and again with
+  # `name`. The default index must come first; once a root has a custom name,
+  # re-indexing it without `name` updates that project instead.
+  SHARED_REPO="$WORK/shared-root"
+  make_repo "$SHARED_REPO" "$ROOT/src/shared"
+  index "$SHARED_REPO"
+  index "$SHARED_REPO" custom-shared-root
+  capture_flags list_projects.shared-root list_projects --format json
+  capture_flags list_projects.paged list_projects --format json --limit 1 --offset 1
+fi
 
 echo "done: $OUT" >&2

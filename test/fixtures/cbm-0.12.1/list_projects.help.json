@@ -1,0 +1,13 @@
+Usage:
+  codebase-memory-mcp cli list_projects --flag value [--flag2 value2 ...]
+  codebase-memory-mcp cli list_projects --args-file <path-to-json>
+  echo '<json>' | codebase-memory-mcp cli list_projects
+  codebase-memory-mcp cli list_projects '<raw-json-args>'
+
+Flags:
+  --format <tree|json> [default: tree]
+  --detail <identity|stats> [default: identity]  stats adds node/edge/database-size counts.
+  --include-details <boolean> [default: false]  Alias for detail=stats: include branch, node/edge counts and database size. Slower.
+  --limit <integer> [default: 50]
+  --offset <integer> [default: 0]
+  --metadata-only <boolean> [default: false]  Compatibility: omit counts, size, and branch.

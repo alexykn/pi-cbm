@@ -21,6 +21,7 @@ const LOCKS_DIRECTORY = "locks";
 const QUEUE_DIRECTORY = "index-queue";
 const PENDING_DIRECTORY = "index-pending";
 const SLOTS_DIRECTORY = "index-slots";
+const RECORDS_DIRECTORY = "index-records";
 const QUEUE_LOCK_NAME = "queue.lock";
 const QUEUE_SEQUENCE_NAME = "queue-sequence";
 
@@ -35,6 +36,14 @@ export const INDEX_LEASE_HELD_REASON = "another session is indexing; retry defer
 export type IndexLeaseResult =
   | { ok: true; lease: IndexLease }
   | { ok: false; reason: string };
+
+/** A successful pi-cbm index of `project` at `root`; times are epoch ms. */
+export type IndexRecord = {
+  project: string;
+  root: string;
+  startedAt: number;
+  finishedAt: number;
+};
 
 export type RetryRange = readonly [number, number];
 
@@ -315,8 +324,41 @@ export class IndexCoordinator {
     }
   }
 
+  /** The last successful pi-cbm index of `project`, shared by every session using this cache dir. */
+  async readIndexRecord(project: string): Promise<IndexRecord | undefined> {
+    const value = await readJson(this.indexRecordPath(project));
+    if (
+      !value ||
+      value.project !== project ||
+      typeof value.root !== "string" ||
+      typeof value.startedAt !== "number" ||
+      typeof value.finishedAt !== "number"
+    ) {
+      return undefined;
+    }
+    return { project, root: value.root, startedAt: value.startedAt, finishedAt: value.finishedAt };
+  }
+
+  /** Replace the record atomically, so a concurrent reader sees the old or the new one, never a partial file. */
+  async writeIndexRecord(record: IndexRecord): Promise<void> {
+    const path = this.indexRecordPath(record.project);
+    await mkdir(join(this.cacheDirectory, COORDINATION_DIRECTORY, RECORDS_DIRECTORY), { recursive: true, mode: 0o700 });
+    const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await writeExclusive(temporaryPath, record);
+      await rename(temporaryPath, path);
+    } catch (error) {
+      await unlink(temporaryPath).catch(() => undefined);
+      throw error;
+    }
+  }
+
   abortAll(): void {
     for (const controller of this.activeControllers) controller.abort();
+  }
+
+  private indexRecordPath(project: string): string {
+    return join(this.cacheDirectory, COORDINATION_DIRECTORY, RECORDS_DIRECTORY, `${projectKey(project)}.json`);
   }
 
   releaseAllSync(): void {
@@ -795,22 +837,30 @@ export class IndexCoordinator {
     return lock;
   }
 
+  /** Wait this coordinator's jittered backoff for retry `attempt` (0-based); false when `signal` aborted first. */
+  waitToRetry(attempt: number, signal: AbortSignal | undefined): Promise<boolean> {
+    return waitForRetry(this.retryDelay(attempt), signal);
+  }
+
   private retryDelay(attempt: number): number {
     const [minimum, maximum] = this.retryRanges[Math.min(attempt, this.retryRanges.length - 1)] ?? [1_000, 2_000];
     return minimum + Math.floor(this.random() * (maximum - minimum + 1));
   }
 }
 
+// These two knobs read process.env inline rather than through shared/env.ts because the
+// cross-process tests load this file on its own, without its relative imports.
 function resolveCacheDirectory(): string {
-  // PI_CBM_CACHE_DIR is the extension-facing name. Keep following the
-  // upstream CBM_CACHE_DIR when it is set so the coordinator stays beside the
-  // CLI's databases even when the upstream variable is configured directly.
+  // PI_CBM_CACHE_DIR wins. CBM_CACHE_DIR is not a pi-cbm alias but cbm's own
+  // variable, which the binary reads from the inherited environment: without
+  // this fallback the leases and index records would land in ~/.cache while
+  // cbm writes its databases elsewhere.
   const configured = process.env.PI_CBM_CACHE_DIR?.trim() || process.env.CBM_CACHE_DIR?.trim();
   return resolve(configured || join(homedir(), ".cache", "codebase-memory-mcp"));
 }
 
 function resolveMaxConcurrentIndexes(): number {
-  const configured = process.env.PI_CBM_MAX_CONCURRENT_INDEXES?.trim() || process.env.CBM_MAX_CONCURRENT_INDEXES?.trim();
+  const configured = process.env.PI_CBM_MAX_CONCURRENT_INDEXES?.trim();
   if (!configured) return 1;
   const parsed = Number(configured);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
@@ -980,7 +1030,8 @@ function isErrno(error: unknown, code: string): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === code;
 }
 
-async function waitForRetry(delay: number, signal: AbortSignal | undefined): Promise<boolean> {
+/** Wait `delay` ms; false when `signal` aborted first. */
+export async function waitForRetry(delay: number, signal: AbortSignal | undefined): Promise<boolean> {
   if (signal?.aborted) return false;
   return new Promise((resolveWait) => {
     let settled = false;

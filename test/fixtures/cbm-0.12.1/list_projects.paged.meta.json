@@ -1,0 +1,7 @@
+{
+  "invocation": "cli --json list_projects --format json --limit 1 --offset 1",
+  "args_json": "",
+  "exit_code": 0,
+  "duration_ms": 1087,
+  "stderr": ""
+}

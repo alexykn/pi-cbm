@@ -2,7 +2,7 @@
 
 Pi extension that exposes [`codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp) as native Pi tools. `codebase-memory-mcp provides a fast local code graph. pi-cbm adds auto-indexing and adapts it for Pi agents in a way that is deliberately optimized for agent workflows and token saving.
 
-This package does not implement an MCP client. It uses `codebase-memory-mcp cli --json <tool> <args>` and registers the core tools directly with Pi. When a Pi session starts, it automatically indexes the current git root, or a safe non-git working directory when enabled, in full mode in the background, then periodically refreshes it so graph tools stay current.
+This package does not implement an MCP client. It uses `codebase-memory-mcp cli --json <tool> <args>` and registers the core tools directly with Pi. When a Pi session starts, it automatically indexes the current git root, or a safe non-git working directory when enabled, in full mode in the background, then re-indexes it whenever its files change so graph tools stay current.
 
 ## What makes this different
 
@@ -11,7 +11,7 @@ This package does not implement an MCP client. It uses `codebase-memory-mcp cli 
 - **Symbol-first helpers.** Upstream `get_code_snippet` works best when you already know the exact `qualified_name`. `pi-cbm` adds `resolve_symbol` and `read_symbol` so the agent can start from a normal symbol name, disambiguate with file/class/route filters, and only read source when the match is unambiguous.
 - **Safe-by-default symbol reading.** `read_symbol` fails closed on ambiguity: it returns candidate identities instead of guessing and reading the wrong source. When exactly one symbol matches, it calls upstream `get_code_snippet` and can optionally include compact direct callers/callees.
 - **Batch source-reading workflows.** `get_code_snippets`, `read_symbols`, and `search_and_read_symbols` let agents inspect several relevant symbols in one tool call instead of looping through many single-symbol calls. These batch tools keep the same compact metadata defaults while preserving essential locations, per-item ambiguity/error results, and source compaction controls.
-- **Current project stays indexed.** On Pi session start, the extension indexes the current git root, or a safe non-git working directory when explicitly enabled, in full mode and refreshes it periodically in the background. A cross-process per-repository lease prevents duplicate indexers for one repository, while a configurable global token queue limits indexing across repositories (`PI_CBM_MAX_CONCURRENT_INDEXES`, default `1`). Root, home, system, and common builtin OS directories are never auto-indexed.
+- **Current project stays indexed.** On Pi session start, the extension indexes the current git root, or a safe non-git working directory when explicitly enabled, in full mode, then checks it periodically in the background and re-indexes only when files changed since the graph was taken (see [Index freshness](#index-freshness)). A cross-process per-repository lease prevents duplicate indexers for one repository, while a configurable global token queue limits indexing across repositories (`PI_CBM_MAX_CONCURRENT_INDEXES`, default `1`). Root, home, system, and common builtin OS directories are never auto-indexed.
 - **Project inference for cwd workflows.** Most tools accept optional `project`, but for normal current-repo work the extension infers the indexed project from Pi's current working directory.
 - **Query tools only.** The agent gets code-exploration tools, not administrative controls. `index_repository` and `list_projects` are used internally for background indexing and project inference; destructive/admin MCP tools such as project deletion are not registered as Pi tools.
 
@@ -91,21 +91,21 @@ Expand-Archive codebase-memory-mcp-windows-amd64.zip -DestinationPath .
 If the binary is not on `PATH`, set:
 
 ```sh
-export CODEBASE_MEMORY_MCP_BIN="$HOME/.local/bin/codebase-memory-mcp"
+export PI_CBM_BIN="$HOME/.local/bin/codebase-memory-mcp"
 ```
 
 ### Supported versions
 
 This extension requires `codebase-memory-mcp` >= 0.12 and targets the 0.12.x CLI contract (`>=0.12.0 <0.13.0`). Captured/tested versions are 0.12.1 (target) and 0.9.0 (old-shape baseline); 0.10.x and 0.11.x were not tested, and the version gate rejects them conservatively. The 0.9.0 fixtures confirm the older shapes differ (`search_graph` object arrays instead of `cols`/`rows` groups, JSON-only `list_projects`), which this client does not parse; a version with those shapes cannot return useful results.
 
-On startup the extension probes the binary and fails loudly on an unsupported version instead of silently returning empty results:
+When a Pi session starts, the extension probes the binary. An unsupported version is shown to you once as an error notification telling you to upgrade, and every graph tool fails with the same message instead of silently returning empty results:
 
 ```text
 codebase-memory-mcp 0.10.0 is unsupported; pi-cbm requires 0.12.x (>=0.12.0 <0.13.0).
 Upgrade codebase-memory-mcp, or reinstall an earlier pi-cbm release (<= 1.2.1) to keep using it.
 ```
 
-A newer untested major/minor continues with a one-time warning instead of failing. Set `PI_CBM_SKIP_VERSION_CHECK=1` to skip the probe (useful for packaged/vendored binaries and for tests).
+A newer untested major/minor, or a version string that cannot be read, continues with a one-time warning notification instead of failing. Set `PI_CBM_SKIP_VERSION_CHECK=1` to skip the probe (useful for packaged/vendored binaries and for tests).
 
 CLI output is normalized before it reaches the tools, so the 0.12 table shapes (`cols`/`rows`, `groups` with `qn_prefix`, `{cols,rows}` label tables, absolute `file` paths, tree-text `list_projects`) are converted to the object arrays and project resolution behavior the rest of the extension expects.
 
@@ -139,9 +139,57 @@ Registers:
 - `query_graph`
 - `detect_changes`
 
-Most tools accept optional `project`. When omitted, the extension infers it from indexed project roots matching Pi's current working directory. Agents should omit `project` for cwd/current-project work and provide it only when intentionally querying an external indexed project. A `project` value must be an indexed project name or a path (absolute, or relative to the current working directory); an unknown value fails with the indexed project list instead of falling back to a guessed name.
+Most tools accept optional `project`. When omitted, the extension infers it from indexed project roots matching Pi's current working directory. Agents should omit `project` for cwd/current-project work and provide it only when intentionally querying an external indexed project. A `project` value must be an indexed project name or a path: absolute, or explicitly relative to the current working directory (`.`, `..`, or containing a `/`). A bare word such as `other-repo` is always treated as a project name, never as a directory under the cwd. An unknown value fails with the indexed project list instead of falling back to a guessed name. If the project list itself cannot be read, an explicit name is passed to `codebase-memory-mcp` unchanged, so its own "project not found" answer still applies.
 
-Matching uses the longest indexed root that contains the working directory, so a git worktree or nested checkout that is not indexed itself resolves to the containing repo's graph. Index the worktree separately to query its own graph.
+Matching uses the longest indexed root that contains the working directory, so a git worktree or nested checkout that is not indexed itself resolves to the containing repo's graph. Index the worktree separately to query its own graph. When two indexed projects share one root (the default name plus a custom `name`), path and cwd resolution picks the default derived name; pass the custom name explicitly to query that one.
+
+## Settings
+
+pi-cbm reads these environment variables. Blank counts as unset, and an invalid number falls back to the default.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `PI_CBM_BIN` | `codebase-memory-mcp` on `PATH`, then `~/.local/bin/codebase-memory-mcp` | Path to the `codebase-memory-mcp` binary. |
+| `PI_CBM_CACHE_DIR` | `CBM_CACHE_DIR`, else `~/.cache/codebase-memory-mcp` | Cache directory for cbm's databases and pi-cbm's leases, queue and index records. Forwarded to the CLI as `CBM_CACHE_DIR`. |
+| `PI_CBM_MAX_CONCURRENT_INDEXES` | `1` | Machine-wide maximum of simultaneous repository indexers. Raise it only when all Pi sessions share the same cache directory and the machine can support the extra load. |
+| `PI_CBM_AUTO_REFRESH_INTERVAL_MS` | `60000` | How often the background refresh checks the session repo. A check that finds no changes runs no index, but each session still pays for it every tick: a `git rev-parse`, a `git ls-files` with a stat of each listed file, one `list_projects` call per 50 indexed projects, and an `index_status` call when the graph was not taken by pi-cbm. Each cbm call is a process of about a second. |
+| `PI_CBM_FRESH_INDEX_TIMEOUT_MS` | `30000` | How long `detect_changes` waits for a re-index (lease wait plus the index) before answering from the existing graph. The re-index keeps running in the background. |
+| `PI_CBM_SKIP_VERSION_CHECK` | unset | `1` skips the `--version` probe. |
+
+`CBM_CACHE_DIR` is `codebase-memory-mcp`'s own variable, not a pi-cbm alias. pi-cbm follows it when `PI_CBM_CACHE_DIR` is unset, so its coordination state stays next to the databases the binary writes.
+
+### Breaking changes
+
+The `CBM_*` aliases for pi-cbm's own settings, and the old binary variables, are no longer read. Rename them:
+
+| Removed | Use instead |
+| --- | --- |
+| `CODEBASE_MEMORY_MCP_BIN`, `CBM_BIN` | `PI_CBM_BIN` |
+| `CBM_MAX_CONCURRENT_INDEXES` | `PI_CBM_MAX_CONCURRENT_INDEXES` |
+| `CBM_AUTO_REFRESH_INTERVAL_MS` | `PI_CBM_AUTO_REFRESH_INTERVAL_MS` |
+| `CBM_FRESH_INDEX_TIMEOUT_MS` | `PI_CBM_FRESH_INDEX_TIMEOUT_MS` |
+| `CBM_SKIP_VERSION_CHECK` | `PI_CBM_SKIP_VERSION_CHECK` |
+
+`CBM_CACHE_DIR` keeps working (see above). When a removed name is set and its replacement is not, the first session start shows a warning naming the replacement; the old value is ignored.
+
+## Index freshness
+
+`codebase-memory-mcp` CLI indexes are not watched, and a full re-index costs the same as the first one (seconds for a small repo, minutes for a large one). pi-cbm therefore re-indexes only when the repo changed since the graph was taken, and it uses one check for both the background refresh and `detect_changes`.
+
+- **When the graph was taken.** Each successful pi-cbm index writes a record (project, root, start and finish time) under `<cache dir>/pi-cbm/index-records/`, shared by every Pi session using that cache dir. The reference is the index's **start** time, so an edit made while it ran still counts as a change. When another client (the cbm MCP server, the CLI by hand) indexed the project later, cbm's `index_status.indexed_at` is used instead. With neither, the graph counts as stale.
+- **Changed since then?** `git ls-files --cached --others --exclude-standard` lists the tracked and untracked, non-ignored files. The global excludes file (`core.excludesFile`) is left out of that listing, because cbm indexes the files only it hides. The repo has changed when any of them, or any of their parent directories, has an mtime at or after the reference minus 1 s (`indexed_at` has second precision). A deleted file shows up through its directory's mtime. Gitignored files do not count. A root git cannot list (no git, or not a repository) always counts as changed, so non-git roots are re-indexed on every refresh as before.
+- **Background refresh.** On session start and on every `PI_CBM_AUTO_REFRESH_INTERVAL_MS` tick, an unchanged repo is skipped and the status line shows `cbm <project> · up to date`. A changed repo is indexed through the usual lease and queue. This is not a TTL: the graph is exactly as fresh as with an index on every tick, but an idle repo no longer costs a full index per session per minute.
+- **`detect_changes`.** An unchanged project is answered right away. A changed one is re-indexed first, by project name, so a custom-named project sharing a root is the one refreshed. If another session, or this session's background refresh, holds the repo's lease, `detect_changes` waits for that index and checks again instead of indexing a second time. Concurrent calls in one session share one re-index; a call whose edits came after that re-index started gets another one. The result carries an `index_freshness` line:
+  - `fresh: no changes since the graph was taken N s ago`
+  - `fresh: re-indexed, graph taken N s ago`
+  - `stale: re-index running since <time>; changes after <time> may be missing` when `PI_CBM_FRESH_INDEX_TIMEOUT_MS` ran out (`re-index queued since <time>` while it still waits for the lease). The index finishes in the background under its lease and the next call sees it. Cancelling the tool call likewise stops only the wait.
+  - `stale: index refresh failed: <reason>; ...` when the re-index failed; the answer comes from the existing graph.
+
+Known gaps:
+
+- An edit that keeps a file's old mtime (`touch -d`, `cp -p`) and changes inside a nested repository or submodule are not seen as changes.
+- When another client indexed last, its `indexed_at` is when that index finished, so edits made while it ran are missed until the next change. This also applies once after upgrading pi-cbm, to the last index the older version ran.
+- Deleting the only untracked file in a directory while keeping the empty directory is not seen: git does not list the empty directory, and its parent's mtime does not change. The same holds for a staged deletion (`git add -A`) that leaves an empty directory; `git rm` removes the directory and is seen.
 
 ## Commands
 
@@ -155,14 +203,6 @@ Open the pi-cbm settings menu:
 - `/cbm disable-non-git` — only auto-index git repositories.
 
 Non-git auto-indexing is disabled by default. Enable it explicitly when working in a non-git project. The unsafe-path guard is always enabled: filesystem roots, home directories, system directories, and common macOS/Linux builtin directories are skipped with a status message explaining why.
-
-Set `PI_CBM_MAX_CONCURRENT_INDEXES` to configure the machine-wide maximum number of simultaneous repository indexers. It defaults to `1`; use a higher value only when all Pi sessions share the same cache directory and the machine can safely support the additional concurrency.
-
-Set `PI_CBM_AUTO_REFRESH_INTERVAL_MS` to override the background refresh interval in milliseconds. It defaults to `60000` (60 seconds), so single-agent workflows do not have to wait for a long freshness TTL. `PI_CBM_CACHE_DIR` optionally overrides the coordination/cache directory and is forwarded to the upstream CLI as `CBM_CACHE_DIR`.
-
-Set `PI_CBM_FRESH_INDEX_TIMEOUT_MS` to bound how long a tool waits for a stale index to be refreshed before answering from the existing graph. `detect_changes` also re-indexes before diffing; keep this timeout small on large repositories so a first call after a long pause does not block for minutes.
-
-The legacy `CBM_MAX_CONCURRENT_INDEXES`, `CBM_AUTO_REFRESH_INTERVAL_MS`, and `CBM_CACHE_DIR` names remain supported for backwards compatibility. When both names are set, the `PI_CBM_*` value takes precedence.
 
 Notes:
 
@@ -209,4 +249,4 @@ npm run typecheck
 npm test
 ```
 
-Tests read recorded CLI output from `test/fixtures/` instead of running a real binary. To refresh the fixtures after a `codebase-memory-mcp` release, follow `test/fixtures/README.md`: `scripts/capture-fixtures.sh <binary> <version>` indexes a neutral copy of `src/` in a temp directory and records each case's stdout plus a `.meta.json` (invocation, args, exit code, stderr). Adding a new version directory means updating the fixture-driven expectations in the matching `test/*.test.ts` files.
+Tests read recorded CLI output from `test/fixtures/` instead of running a real binary; the freshness tests drive `test/fixtures/fake-cbm.mjs`, a stand-in CLI, against real git repos in temp dirs. To refresh the fixtures after a `codebase-memory-mcp` release, follow `test/fixtures/README.md`: `scripts/capture-fixtures.sh <binary> <version>` indexes a neutral copy of `src/` in a temp directory and records each case's stdout plus a `.meta.json` (invocation, args, exit code, stderr). Adding a new version directory means updating the fixture-driven expectations in the matching `test/*.test.ts` files.

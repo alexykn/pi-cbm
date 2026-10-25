@@ -495,12 +495,6 @@ function compactArchitectureData(data: unknown): MetadataProjection {
   return { data: appendMetadataHint(compact), pruned: true };
 }
 
-/** 0.12 `detect_changes.impacted` rows carry `qn`, unlike normalized table rows. */
-function aliasImpactedRow(item: CbmData): CbmData {
-  if (!isRecord(item) || item.qualified_name !== undefined || typeof item.qn !== "string") return item;
-  return { ...item, qualified_name: item.qn };
-}
-
 function compactDetectChangesData(data: unknown): MetadataProjection {
   if (!isRecord(data)) return { data, pruned: false };
   const compact = pickDefined(data, [
@@ -527,7 +521,7 @@ function compactDetectChangesData(data: unknown): MetadataProjection {
     "truncated",
     "index_freshness",
   ]);
-  if (Array.isArray(data.impacted)) compact.impacted = compactSymbolArray(data.impacted.map(aliasImpactedRow));
+  if (Array.isArray(data.impacted)) compact.impacted = compactSymbolArray(data.impacted);
   if (Array.isArray(data.impacted_symbols)) compact.impacted_symbols = compactSymbolArray(data.impacted_symbols);
   if (Array.isArray(data.impacts)) compact.impacts = compactSymbolArray(data.impacts);
   if (data.impacted_has_more === true || data.changed_has_more === true) {

@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndexCoordinator } from "../src/domain/index-coordinator.js";
-import { ProjectService } from "../src/domain/project.js";
+import { IndexingService } from "../src/domain/indexing.js";
+import { ProjectCatalog } from "../src/domain/project-catalog.js";
 
 // Workers import the TypeScript source directly; Node strips the types.
 const COORDINATOR_MODULE_PATH = fileURLToPath(new URL("../src/domain/index-coordinator.ts", import.meta.url));
@@ -70,7 +71,6 @@ describe("IndexCoordinator", () => {
   });
 
   it("allows the configured number of repositories to index concurrently", async () => {
-    vi.stubEnv("CBM_MAX_CONCURRENT_INDEXES", "1");
     vi.stubEnv("PI_CBM_MAX_CONCURRENT_INDEXES", "2");
     const { cacheDirectory, repo } = await createFixture();
     const secondRepo = join(cacheDirectory, "second-repo");
@@ -200,27 +200,9 @@ describe("IndexCoordinator", () => {
     await result.lease.release();
   });
 
-  it("uses the legacy concurrency environment name", async () => {
-    vi.stubEnv("PI_CBM_MAX_CONCURRENT_INDEXES", "");
-    vi.stubEnv("CBM_MAX_CONCURRENT_INDEXES", "2");
+  it("follows cbm's own CBM_CACHE_DIR when PI_CBM_CACHE_DIR is unset", async () => {
     const { cacheDirectory, repo } = await createFixture();
-    const secondRepo = join(cacheDirectory, "second-repo");
-    await mkdir(secondRepo);
-    const coordinator = new IndexCoordinator({ cacheDirectory, ...FAST_RETRY_OPTIONS });
-
-    const first = await coordinator.acquire(repo);
-    expect(first.ok).toBe(true);
-    if (!first.ok) return;
-
-    const second = await coordinator.acquire(secondRepo);
-    expect(second.ok).toBe(true);
-    await first.lease.release();
-    if (second.ok) await second.lease.release();
-  });
-
-  it("uses the legacy cache directory environment name", async () => {
-    const { cacheDirectory, repo } = await createFixture();
-    const configuredCache = join(cacheDirectory, "legacy-cache");
+    const configuredCache = join(cacheDirectory, "upstream-cache");
     vi.stubEnv("PI_CBM_CACHE_DIR", "");
     vi.stubEnv("CBM_CACHE_DIR", configuredCache);
     const coordinator = new IndexCoordinator(FAST_RETRY_OPTIONS);
@@ -365,9 +347,9 @@ describe("IndexCoordinator", () => {
         if (shouldFail) throw new Error("index failed");
         return { ok: true, data: { project: "repo" }, rawText: "", stderr: "" };
       },
-    } as unknown as ConstructorParameters<typeof ProjectService>[0];
+    } as unknown as ConstructorParameters<typeof IndexingService>[0];
     const coordinator = new IndexCoordinator({ cacheDirectory, ...FAST_RETRY_OPTIONS });
-    const service = new ProjectService(cbm, { autoIndexNonGitDirectories: false }, coordinator);
+    const service = new IndexingService(cbm, { autoIndexNonGitDirectories: false }, coordinator, new ProjectCatalog(cbm));
 
     await expect(service.indexCurrentRepo(repo)).rejects.toThrow("index failed");
     shouldFail = false;

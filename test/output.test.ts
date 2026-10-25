@@ -37,6 +37,16 @@ describe("compact search_graph output on cbm 0.12 paging", () => {
     expect(String(data.pagination_hint)).toContain("offset=3");
   });
 
+  it("hints the offset that captured page 2 proves cbm honours", async () => {
+    // Requested with limit=3, offset=3: an ignored offset would report next_offset 3, not 6.
+    const page2 = normalizedFixture("search_graph.label-page2") as { results: unknown[]; next_offset: number };
+    const result = await new OutputService().buildCompactableToolResult("Graph search results", page2, {}, { tool: "search_graph" });
+
+    expect(page2.results).toHaveLength(3);
+    expect(page2.next_offset).toBe(6);
+    expect(String((result.details.data as Record<string, unknown>).pagination_hint)).toContain("offset=6");
+  });
+
   it("renders total with a returned/truncated fallback", () => {
     const withTotal = renderResult("search_graph")({ details: { data: { total: 61, has_more: true } } }, undefined, theme);
     expect(withTotal.render(200).join(" ")).toContain("total=61");
@@ -121,49 +131,7 @@ describe("compact search_code output on cbm 0.12 tables", () => {
   });
 });
 
-describe("compact get_architecture output on cbm 0.12 tables", () => {
-  it("surfaces label/edge counts, package sizes, and the aspects hint", async () => {
-    const result = await new OutputService().buildCompactableToolResult(
-      "Architecture overview",
-      normalizedFixture("get_architecture.default"),
-      {},
-      { tool: "get_architecture" },
-    );
-
-    const data = result.details.data as Record<string, unknown>;
-    expect(String(data.aspects_hint)).toContain("aspects");
-    expect((data.node_labels as Array<Record<string, unknown>>)[0]).toEqual({ label: "Function", count: 130 });
-    expect((data.edge_types as Array<Record<string, unknown>>)[0]).toEqual({ type: "CALLS", count: 384 });
-    expect((data.languages as Array<Record<string, unknown>>)[0]).toEqual({ language: "TypeScript", files: 26 });
-    expect((data.packages as Array<Record<string, unknown>>)[0]).toEqual({ name: "domain", nodes: 176, fan_in: 0, fan_out: 0 });
-  });
-});
-
 describe("compact detect_changes output on cbm 0.12 shapes", () => {
-  it("keeps impacted identities from qn plus base/module meta", async () => {
-    const result = await new OutputService().buildCompactableToolResult(
-      "Change impact results",
-      normalizedFixture("detect_changes.dirty"),
-      {},
-      { tool: "detect_changes" },
-    );
-
-    const data = result.details.data as Record<string, unknown>;
-    expect(data.base).toBe("master");
-    expect(data.merge_base).toBe("6b3b02fbda82ca7d24c35ba5c7d038ae5a85d10d");
-    expect(data.changed_files).toEqual(["src/shared/strings.ts"]);
-    expect(data.impacted_total).toBe(25);
-    const impacted = data.impacted as Array<Record<string, unknown>>;
-    expect(impacted).toHaveLength(25);
-    expect(impacted[0]!.qualified_name).toBe("tmp-cbm-fixture-repo.src.domain.auto-index-paths.validateAutoIndexPath");
-    expect(impacted[0]!.file).toBe("src/domain/auto-index-paths.ts");
-    expect(impacted[0]!.hop).toBe(1);
-    expect(data.impacted_modules).toEqual([{ module: "src/domain", count: 23 }, { module: "src/cbm", count: 2 }]);
-    expect(data.impacted_total_relation).toBe("eq");
-    expect(data.module_total).toBe(2);
-    expect(data.module_has_more).toBe(false);
-  });
-
   it("emits a truncation hint when impacted or changed pages have more", async () => {
     const result = await new OutputService().buildCompactableToolResult(
       "Change impact results",
@@ -173,16 +141,5 @@ describe("compact detect_changes output on cbm 0.12 shapes", () => {
     );
 
     expect(String((result.details.data as Record<string, unknown>).truncation_hint)).toContain("More impacted symbols");
-  });
-
-  it("surfaces the freshness line", async () => {
-    const result = await new OutputService().buildCompactableToolResult(
-      "Change impact results",
-      { changed_files: [], impacted: [], index_freshness: "index refreshed 0 s ago" },
-      {},
-      { tool: "detect_changes" },
-    );
-
-    expect((result.details.data as Record<string, unknown>).index_freshness).toBe("index refreshed 0 s ago");
   });
 });

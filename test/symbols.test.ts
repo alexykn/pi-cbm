@@ -4,8 +4,8 @@ import type { CbmCallResult } from "../src/cbm/result.js";
 import type { CbmClient } from "../src/cbm/client.js";
 import { normalizeCbmData } from "../src/cbm/normalize.js";
 import { OutputService } from "../src/domain/output.js";
-import { ProjectService, type ToolExecutionContext } from "../src/domain/project.js";
-import type { IndexCoordinator } from "../src/domain/index-coordinator.js";
+import { ProjectCatalog } from "../src/domain/project-catalog.js";
+import { ProjectResolver, type ToolExecutionContext } from "../src/domain/project-resolver.js";
 import { SymbolService } from "../src/domain/symbols.js";
 
 const FIXTURE_DIR = new URL("./fixtures/cbm-0.12.1/", import.meta.url);
@@ -40,8 +40,8 @@ function fakeClient(
 
 function serviceWith(handler: (tool: string, args: Record<string, unknown>) => CbmCallResult, projects?: CbmCallResult): SymbolService {
   const cbm = fakeClient(handler, projects);
-  const projectService = new ProjectService(cbm, { autoIndexNonGitDirectories: false }, {} as IndexCoordinator);
-  return new SymbolService(cbm, projectService, new OutputService());
+  const catalog = new ProjectCatalog(cbm);
+  return new SymbolService(cbm, new ProjectResolver(cbm, catalog), catalog, new OutputService());
 }
 
 function snippetResult(data: Record<string, unknown>): CbmCallResult {
@@ -241,10 +241,10 @@ describe("SymbolService on cbm 0.12 shapes", () => {
         return snippetResult({ name: "x", qualified_name: "q", file_path: "/abs/a.ts", start_line: 1, end_line: 2 });
       },
     } as unknown as CbmClient;
-    const projectService = new ProjectService(cbm, { autoIndexNonGitDirectories: false }, {} as IndexCoordinator);
+    const catalog = new ProjectCatalog(cbm);
 
-    await projectService.relativizePaths({ file_path: "/abs/a.ts" }, "missing");
-    await projectService.relativizePaths({ file_path: "/abs/a.ts" }, "missing");
+    await catalog.relativizePaths({ file_path: "/abs/a.ts" }, "missing");
+    await catalog.relativizePaths({ file_path: "/abs/a.ts" }, "missing");
 
     expect(listCalls).toBe(1);
   });

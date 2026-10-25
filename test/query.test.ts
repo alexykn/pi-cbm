@@ -1,30 +1,36 @@
 import { describe, expect, it } from "vitest";
 import type { CbmClient } from "../src/cbm/client.js";
+import { CbmToolError } from "../src/cbm/errors.js";
 import type { CbmCallResult } from "../src/cbm/result.js";
-import type { IndexCoordinator } from "../src/domain/index-coordinator.js";
+import type { IndexingService } from "../src/domain/indexing.js";
 import { OutputService } from "../src/domain/output.js";
-import { ProjectService, type ToolExecutionContext } from "../src/domain/project.js";
+import { ProjectCatalog } from "../src/domain/project-catalog.js";
+import { ProjectResolver, type ToolExecutionContext } from "../src/domain/project-resolver.js";
 import { QueryService } from "../src/domain/query.js";
 import type { TraceService } from "../src/domain/trace.js";
 
 const CTX: ToolExecutionContext = { cwd: "/tmp/cbm-fixture-repo" };
 
-function queryServiceWith(callTool: (tool: string, args: Record<string, unknown>) => CbmCallResult | Promise<CbmCallResult>): QueryService {
+const LISTED: CbmCallResult = { ok: true, data: { projects: [{ name: "repo", root_path: "/tmp/cbm-fixture-repo" }], has_more: false }, rawText: "", stderr: "" };
+
+function queryServiceWith(
+  callTool: (tool: string, args: Record<string, unknown>) => CbmCallResult | Promise<CbmCallResult>,
+  listed: CbmCallResult = LISTED,
+): QueryService {
   const cbm = {
-    callTool: async (tool: string, args: Record<string, unknown>): Promise<CbmCallResult> => {
-      if (tool === "list_projects") {
-        return { ok: true, data: { projects: [{ name: "repo", root_path: "/tmp/cbm-fixture-repo" }], has_more: false }, rawText: "", stderr: "" };
-      }
-      return callTool(tool, args);
-    },
+    callTool: async (tool: string, args: Record<string, unknown>): Promise<CbmCallResult> => (tool === "list_projects" ? listed : callTool(tool, args)),
     findGitRoot: async () => undefined,
   } as unknown as CbmClient;
-  const projects = new ProjectService(cbm, { autoIndexNonGitDirectories: false }, {} as IndexCoordinator);
-  return new QueryService(cbm, projects, new OutputService(), {} as TraceService);
+  const catalog = new ProjectCatalog(cbm);
+  return new QueryService(cbm, new ProjectResolver(cbm, catalog), catalog, {} as IndexingService, new OutputService(), {} as TraceService);
 }
 
-const projectError = () => {
-  throw new Error('{"error":"project not found or not indexed","available_projects":["tmp-cbm-fixture-repo"]}');
+const projectError = (tool: string) => {
+  throw new CbmToolError(tool, {
+    error: "project not found or not indexed",
+    hint: "Run list_projects to see indexed projects.",
+    available_projects: ["tmp-cbm-fixture-repo"],
+  });
 };
 
 describe("QueryService project errors", () => {
@@ -33,6 +39,24 @@ describe("QueryService project errors", () => {
 
     await expect(service.queryGraph({ project: "repo" }, CTX)).rejects.toThrow(
       /project not found or not indexed.*indexed projects: repo -> \/tmp\/cbm-fixture-repo.*absolute path/,
+    );
+  });
+
+  it("shows cbm's error, hint and available projects as text, not raw JSON", async () => {
+    const service = queryServiceWith(projectError);
+
+    let message = "";
+    await service.queryGraph({ project: "repo" }, CTX).catch((error: Error) => (message = error.message));
+
+    expect(message).toMatch(/^project not found or not indexed Run list_projects to see indexed projects\. available_projects: tmp-cbm-fixture-repo No indexed project/);
+    expect(message).not.toContain('{"');
+  });
+
+  it("leaves an explicit project to cbm when list_projects fails and says the list is unavailable", async () => {
+    const service = queryServiceWith(projectError, { ok: false, data: { error: "list timed out" }, rawText: "", stderr: "" });
+
+    await expect(service.queryGraph({ project: "typo-repo" }, CTX)).rejects.toThrow(
+      /^project not found or not indexed .*No indexed project matches the given value "typo-repo".*the indexed project list could not be read/,
     );
   });
 

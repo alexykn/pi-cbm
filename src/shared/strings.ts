@@ -1,5 +1,4 @@
-import { homedir } from "node:os";
-import { dirname, isAbsolute } from "node:path";
+import { dirname } from "node:path";
 import { isRecord } from "./object.js";
 
 export function formatSize(bytes: number): string {
@@ -23,6 +22,11 @@ export function errorText(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/** A thrown Error's message, or undefined when it is not an Error or has none. */
+export function errorMessage(error: unknown): string | undefined {
+  return error instanceof Error && error.message ? error.message : undefined;
+}
+
 /** Like `errorText`, but keeps cbm's `hint`/`available_projects` context for user-facing throws. */
 export function errorTextWithDetails(value: unknown): string {
   const text = errorText(value);
@@ -36,14 +40,6 @@ export function errorTextWithDetails(value: unknown): string {
     if (projects.length > 0) parts.push(`available_projects: ${projects.join(", ")}`);
   }
   return parts.join(" ");
-}
-
-export function normalizePathForDisplay(path: string): string {
-  if (!isAbsolute(path)) return path;
-  const home = homedir();
-  if (path === home) return "~";
-  if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
-  return path;
 }
 
 export function basename(path: string): string {

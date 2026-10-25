@@ -16,6 +16,8 @@ const COLUMN_ALIASES: Record<string, string> = {
  * cbm 0.12 returns compact `{cols, rows}` / `{qn_rule, cols, groups}` tables.
  * Turn them into the object arrays earlier pi-cbm consumers expect, leaving
  * 0.9-style JSON and `query_graph`'s `{columns, rows}` untouched.
+ * `detect_changes.impacted` rows are plain objects with table keys (`qn`,
+ * `file`), so they get the same aliases.
  */
 export function normalizeCbmData(data: unknown): CbmData {
   return normalizeValue(data);
@@ -32,6 +34,7 @@ function normalizeValue(value: unknown): CbmData {
 
   const result: Json = {};
   for (const [key, entry] of Object.entries(value)) result[key] = normalizeValue(entry);
+  if (Array.isArray(result.impacted)) result.impacted = result.impacted.map((row) => (isRecord(row) ? applyAliases(row) : row));
   return result;
 }
 
