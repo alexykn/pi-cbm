@@ -42,7 +42,7 @@ export function registerLifecycle(pi: ExtensionAPI, services: CbmServices) {
     for (const notice of services.cbm.takeVersionNotices()) session.ui.notify(notice.message, notice.level);
   }
 
-  // Once per process: a leftover old variable name would otherwise be ignored silently.
+  // Once per registration (an extension reload warns again): a leftover old variable name would otherwise be ignored silently.
   function warnAboutRemovedEnv(session: SessionResources) {
     if (removedEnvChecked) return;
     removedEnvChecked = true;
