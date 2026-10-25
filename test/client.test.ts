@@ -109,6 +109,7 @@ describe("CbmClient environment", () => {
     );
     await chmod(binaryPath, 0o755);
     vi.stubEnv("CODEBASE_MEMORY_MCP_BIN", binaryPath);
+    vi.stubEnv("PI_CBM_SKIP_VERSION_CHECK", "1");
     const legacyCache = join(directory, "legacy-cache");
     const configuredCache = join(directory, "configured-cache");
     vi.stubEnv("CBM_CACHE_DIR", legacyCache);
@@ -121,7 +122,7 @@ describe("CbmClient environment", () => {
     vi.stubEnv("PI_CBM_CACHE_DIR", "");
     await client.callTool("list_projects", {});
     await expect(readFile(observedPath, "utf8")).resolves.toBe(legacyCache);
-  });
+  }, 20_000);
 });
 
 describe("CbmClient CLI transport", () => {

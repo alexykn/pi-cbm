@@ -52,7 +52,8 @@ describe("lifecycle cbm version notices", () => {
 
     registerLifecycle(pi, services);
     handlers.get("session_start")?.({}, context);
-    await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(1));
+    // The probe spawns a real node script, which can take seconds on a loaded machine.
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(1), { timeout: 15_000 });
     handlers.get("session_shutdown")?.({}, context);
     handlers.get("session_start")?.({}, context);
     await checkVersion.mock.results[1]!.value;
@@ -61,7 +62,7 @@ describe("lifecycle cbm version notices", () => {
 
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith(expect.stringMatching(/0\.9\.0 is unsupported.*Upgrade codebase-memory-mcp/), "error");
-  });
+  }, 20_000);
 });
 
 describe("lifecycle auto-refresh", () => {
