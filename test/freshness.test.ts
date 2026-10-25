@@ -5,8 +5,10 @@ import { describe, expect, it } from "vitest";
 import type { CbmClient } from "../src/cbm/client.js";
 import type { CbmCallResult } from "../src/cbm/result.js";
 import { INDEX_LEASE_HELD_REASON, type IndexCoordinator, type IndexLeaseResult } from "../src/domain/index-coordinator.js";
+import { IndexingService } from "../src/domain/indexing.js";
 import { OutputService } from "../src/domain/output.js";
-import { ProjectService, type ToolExecutionContext } from "../src/domain/project.js";
+import { ProjectCatalog } from "../src/domain/project-catalog.js";
+import { ProjectResolver, type ToolExecutionContext } from "../src/domain/project-resolver.js";
 import { QueryService } from "../src/domain/query.js";
 import type { TraceService } from "../src/domain/trace.js";
 
@@ -49,13 +51,14 @@ async function harness(options: {
     },
     findGitRoot: options.findGitRoot ?? (async () => root),
   } as unknown as CbmClient;
-  const projects = new ProjectService(cbm, { autoIndexNonGitDirectories: false }, { acquire: options.acquire } as unknown as IndexCoordinator);
+  const catalog = new ProjectCatalog(cbm);
+  const indexing = new IndexingService(cbm, { autoIndexNonGitDirectories: false }, { acquire: options.acquire } as unknown as IndexCoordinator, catalog);
 
   return {
     ctx: { cwd: root, signal: options.ctxSignal },
     calls,
     indexArgs,
-    query: new QueryService(cbm, projects, new OutputService(), traceStub),
+    query: new QueryService(cbm, new ProjectResolver(cbm, catalog), catalog, indexing, new OutputService(), traceStub),
     root,
     cleanup: () => rm(base, { recursive: true, force: true }),
   };

@@ -1,7 +1,8 @@
 import { Type } from "typebox";
 import type { CbmClient } from "../cbm/client.js";
 import type { OutputService } from "../domain/output.js";
-import type { ProjectService, ToolExecutionContext } from "../domain/project.js";
+import type { IndexingService } from "../domain/indexing.js";
+import type { ToolExecutionContext } from "../domain/project-resolver.js";
 import type { QueryService } from "../domain/query.js";
 import type { SymbolService } from "../domain/symbols.js";
 import type { TraceService } from "../domain/trace.js";
@@ -25,7 +26,7 @@ import {
 
 export type CbmServices = {
   cbm: CbmClient;
-  projects: ProjectService;
+  indexing: IndexingService;
   output: OutputService;
   symbols: SymbolService;
   trace: TraceService;

@@ -47,7 +47,7 @@ export function registerLifecycle(pi: ExtensionAPI, services: CbmServices) {
 
     inFlightGeneration = generation;
     try {
-      const result = await services.projects.indexCurrentRepo(session.cwd, session.signal);
+      const result = await services.indexing.indexCurrentRepo(session.cwd, session.signal);
       if (generation !== sessionGeneration) return; // session changed mid-run
       if (result.status === "skipped") {
         session.ui.setStatus("codebase-memory", `cbm skipped: ${result.reason}`);

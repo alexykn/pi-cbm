@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndexCoordinator } from "../src/domain/index-coordinator.js";
-import { ProjectService } from "../src/domain/project.js";
+import { IndexingService } from "../src/domain/indexing.js";
+import { ProjectCatalog } from "../src/domain/project-catalog.js";
 
 const FAST_RETRY_OPTIONS = {
   retryRanges: [[1, 1] as const] as const,
@@ -363,9 +364,9 @@ describe("IndexCoordinator", () => {
         if (shouldFail) throw new Error("index failed");
         return { ok: true, data: { project: "repo" }, rawText: "", stderr: "" };
       },
-    } as unknown as ConstructorParameters<typeof ProjectService>[0];
+    } as unknown as ConstructorParameters<typeof IndexingService>[0];
     const coordinator = new IndexCoordinator({ cacheDirectory, ...FAST_RETRY_OPTIONS });
-    const service = new ProjectService(cbm, { autoIndexNonGitDirectories: false }, coordinator);
+    const service = new IndexingService(cbm, { autoIndexNonGitDirectories: false }, coordinator, new ProjectCatalog(cbm));
 
     await expect(service.indexCurrentRepo(repo)).rejects.toThrow("index failed");
     shouldFail = false;

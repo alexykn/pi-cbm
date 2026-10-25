@@ -3,7 +3,9 @@ import type { CbmData } from "../cbm/normalize.js";
 import { queryTimeoutMs } from "../cbm/timeouts.js";
 import { isRecord, removeUndefined } from "../shared/object.js";
 import { OutputService, stripOutputControls } from "./output.js";
-import { ProjectService, type IndexFreshness, type ToolExecutionContext } from "./project.js";
+import type { IndexFreshness, IndexingService } from "./indexing.js";
+import type { ProjectCatalog } from "./project-catalog.js";
+import type { ProjectResolver, ToolExecutionContext } from "./project-resolver.js";
 import { TraceService } from "./trace.js";
 
 const NUMERIC_QUERY_COLUMNS = new Set([
@@ -62,7 +64,9 @@ function upstreamSearchCodeParams(params: Record<string, unknown>): Record<strin
 export class QueryService {
   constructor(
     private readonly cbm: CbmClient,
-    private readonly projects: ProjectService,
+    private readonly resolver: ProjectResolver,
+    private readonly catalog: ProjectCatalog,
+    private readonly indexing: IndexingService,
     private readonly output: OutputService,
     private readonly trace: TraceService,
   ) {}
@@ -76,25 +80,25 @@ export class QueryService {
   ) {
     const upstreamParams = stripOutputControls(params);
     const toolParams = toolName === "search_code" ? upstreamSearchCodeParams(upstreamParams) : upstreamParams;
-    const args = needsProject ? await this.withProject(toolParams, ctx) : removeUndefined(toolParams);
+    const args = needsProject ? await this.resolver.withProject(toolParams, ctx) : removeUndefined(toolParams);
     const project = typeof args.project === "string" ? args.project : "";
     // CLI-mode cbm indexes are not watched; re-index before impact analysis so an edit made moments ago is visible.
-    const freshness = toolName === "detect_changes" && project ? await this.projects.ensureFreshIndex(project, ctx) : undefined;
-    const result = await this.projects.withProjectError(project, ctx, () =>
+    const freshness = toolName === "detect_changes" && project ? await this.indexing.ensureFreshIndex(project, ctx) : undefined;
+    const result = await this.resolver.withProjectError(project, ctx, () =>
       this.cbm.callTool(toolName, args, { signal: ctx.signal, timeoutMs: queryTimeoutMs(params.timeout_ms) }),
     );
     const data = project && (toolName === "search_graph" || toolName === "get_architecture" || toolName === "detect_changes")
       ? await this.trace.enrichTraceLocations(result.data, project, params, ctx)
       : project && isRecord(result.data)
-        ? await this.projects.relativizePaths(result.data, project, ctx.signal)
+        ? await this.catalog.relativizePaths(result.data, project, ctx.signal)
         : result.data;
     const outputData = freshness ? withIndexFreshness(data as CbmData, freshness) : data;
     return this.output.buildCompactableToolResult(title, outputData, params, { tool: toolName, args, stderr: result.stderr });
   }
 
   async queryGraph(params: Record<string, unknown>, ctx: ToolExecutionContext) {
-    const args = await this.withProject(stripOutputControls({ max_rows: 200, ...params }), ctx);
-    const result = await this.projects.withProjectError(String(args.project ?? ""), ctx, () =>
+    const args = await this.resolver.withProject(stripOutputControls({ max_rows: 200, ...params }), ctx);
+    const result = await this.resolver.withProjectError(String(args.project ?? ""), ctx, () =>
       this.cbm.callTool("query_graph", args, { signal: ctx.signal, timeoutMs: queryTimeoutMs(params.timeout_ms) }),
     );
     return this.output.buildCompactableToolResult("Cypher query results", coerceQueryGraphMetrics(result.data as CbmData), params, {
@@ -103,9 +107,5 @@ export class QueryService {
       stderr: result.stderr,
       numeric_metrics_normalized: true,
     });
-  }
-
-  private async withProject<T extends Record<string, unknown>>(params: T, ctx: ToolExecutionContext): Promise<Record<string, unknown>> {
-    return removeUndefined({ ...params, project: await this.projects.resolveProject(params.project, ctx.cwd, ctx.signal) });
   }
 }

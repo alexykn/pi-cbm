@@ -4,8 +4,8 @@ import type { CbmCallResult } from "../src/cbm/result.js";
 import type { CbmClient } from "../src/cbm/client.js";
 import { normalizeCbmData } from "../src/cbm/normalize.js";
 import { OutputService } from "../src/domain/output.js";
-import { ProjectService, type ToolExecutionContext } from "../src/domain/project.js";
-import type { IndexCoordinator } from "../src/domain/index-coordinator.js";
+import { ProjectCatalog } from "../src/domain/project-catalog.js";
+import { ProjectResolver, type ToolExecutionContext } from "../src/domain/project-resolver.js";
 import { SymbolService } from "../src/domain/symbols.js";
 import { TraceService } from "../src/domain/trace.js";
 
@@ -62,9 +62,10 @@ function fakeClient(handler: (tool: string, args: Record<string, unknown>) => Cb
 
 function traceService(handler: (tool: string, args: Record<string, unknown>) => CbmCallResult): TraceService {
   const cbm = fakeClient(handler);
-  const projects = new ProjectService(cbm, { autoIndexNonGitDirectories: false }, {} as IndexCoordinator);
+  const catalog = new ProjectCatalog(cbm);
+  const resolver = new ProjectResolver(cbm, catalog);
   const output = new OutputService();
-  return new TraceService(cbm, projects, output, new SymbolService(cbm, projects, output));
+  return new TraceService(cbm, resolver, output, new SymbolService(cbm, resolver, catalog, output));
 }
 
 function handlerWithTrace(traceResult: (args: Record<string, unknown>) => CbmCallResult) {

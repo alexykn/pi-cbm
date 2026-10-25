@@ -38,10 +38,6 @@ export class CbmClient {
     }
   }
 
-  async gitRoot(cwd: string, signal?: AbortSignal): Promise<string> {
-    return (await this.findGitRoot(cwd, signal)) ?? cwd;
-  }
-
   async callTool(toolName: string, args: Record<string, unknown>, options: CbmCallOptions = {}): Promise<CbmCallResult> {
     const binary = await resolveCbmBinary();
     const version = await checkCbmVersion(binary);

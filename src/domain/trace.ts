@@ -6,7 +6,7 @@ import { mapLimit } from "../shared/concurrency.js";
 import { isRecord, removeUndefined, stringProp } from "../shared/object.js";
 import { errorText, escapeRegExp } from "../shared/strings.js";
 import { OutputService, stripOutputControls } from "./output.js";
-import { ProjectService, type ToolExecutionContext } from "./project.js";
+import type { ProjectResolver, ToolExecutionContext } from "./project-resolver.js";
 import { dedupeCandidates, hasLocation, searchCandidates, type SearchCandidate, SymbolService } from "./symbols.js";
 
 const ENRICH_CONCURRENCY = 8;
@@ -49,13 +49,13 @@ function upstreamTraceParams(params: Record<string, unknown>): Record<string, un
 export class TraceService {
   constructor(
     private readonly cbm: CbmClient,
-    private readonly projects: ProjectService,
+    private readonly resolver: ProjectResolver,
     private readonly output: OutputService,
     private readonly symbols: SymbolService,
   ) {}
 
   async trace(params: Record<string, unknown>, ctx: ToolExecutionContext) {
-    const args = await this.withProject(upstreamTraceParams(params), ctx);
+    const args = await this.resolver.withProject(upstreamTraceParams(params), ctx);
     const project = String(args.project ?? "");
     const functionName = String(args.function_name ?? "");
     const result = await this.cbm.callTool("trace_path", args, {
@@ -70,7 +70,7 @@ export class TraceService {
       const enriched = filterTraceData(await this.enrichTraceLocations(result.data, project, params, ctx), params);
       return this.output.buildCompactableToolResult("Trace path results", enriched, params, { tool: "trace_path", args, stderr: result.stderr });
     }
-    if (!isFunctionNotFound(result.data) || !functionName || !project) throw await this.projects.projectLookupError(result.data, project, ctx.cwd, ctx.signal);
+    if (!isFunctionNotFound(result.data) || !functionName || !project) throw await this.resolver.projectLookupError(result.data, project, ctx);
 
     const candidates = await this.findTraceCandidates(functionName, project, ctx);
     if (candidates.length === 1 && candidates[0]?.qualified_name) {
@@ -153,10 +153,6 @@ export class TraceService {
     return enriched;
   }
 
-  private async withProject<T extends Record<string, unknown>>(params: T, ctx: ToolExecutionContext): Promise<Record<string, unknown>> {
-    return removeUndefined({ ...params, project: await this.projects.resolveProject(params.project, ctx.cwd, ctx.signal) });
-  }
-
   private async findTraceCandidates(functionName: string, project: string, ctx: ToolExecutionContext): Promise<SearchCandidate[]> {
     const escapedName = escapeRegExp(functionName);
     const shortName = functionName.split(".").at(-1) ?? functionName;
@@ -184,7 +180,7 @@ export class TraceService {
       candidates.push(...batch);
     }
 
-    if (candidates.length === 0 && failures.length === searches.length) throw await this.projects.projectLookupError(failures[0], project, ctx.cwd, ctx.signal);
+    if (candidates.length === 0 && failures.length === searches.length) throw await this.resolver.projectLookupError(failures[0], project, ctx);
     return dedupeCandidates(candidates).slice(0, 10);
   }
 }

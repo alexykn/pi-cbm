@@ -5,7 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { CbmClient } from "../src/cbm/client.js";
 import type { CbmCallResult } from "../src/cbm/result.js";
 import type { IndexCoordinator } from "../src/domain/index-coordinator.js";
-import { ProjectService } from "../src/domain/project.js";
+import { IndexingService } from "../src/domain/indexing.js";
+import { ProjectCatalog } from "../src/domain/project-catalog.js";
+import { ProjectResolver } from "../src/domain/project-resolver.js";
 
 type ProjectRow = { name: string; root_path: string };
 
@@ -39,16 +41,22 @@ function serviceWith(options: Fake = {}) {
     },
     findGitRoot: async () => options.gitRoot,
   } as unknown as CbmClient;
-  return { service: new ProjectService(cbm, { autoIndexNonGitDirectories: false }, coordinator), listArgs };
+  const catalog = new ProjectCatalog(cbm);
+  return {
+    catalog,
+    resolver: new ProjectResolver(cbm, catalog),
+    indexing: new IndexingService(cbm, { autoIndexNonGitDirectories: false }, coordinator, catalog),
+    listArgs,
+  };
 }
 
-describe("ProjectService.resolveProject", () => {
+describe("project resolution", () => {
   it("infers the project whose root contains the cwd", async () => {
-    await expect(serviceWith().service.resolveProject(undefined, "/work/repo/src/domain")).resolves.toBe("repo");
+    await expect(serviceWith().resolver.resolveProject(undefined, "/work/repo/src/domain")).resolves.toBe("repo");
   });
 
   it("picks the longest matching root for nested projects", async () => {
-    const { service } = serviceWith({
+    const { resolver } = serviceWith({
       list: () =>
         okPage([
           { name: "outer", root_path: "/work" },
@@ -56,48 +64,48 @@ describe("ProjectService.resolveProject", () => {
         ]),
     });
 
-    await expect(service.resolveProject(undefined, "/work/repo/src")).resolves.toBe("inner");
+    await expect(resolver.resolveProject(undefined, "/work/repo/src")).resolves.toBe("inner");
   });
 
   it("fails loudly with the indexed projects when the cwd matches nothing", async () => {
-    const { service } = serviceWith({ list: () => okPage([{ name: "other", root_path: "/work/other" }]) });
+    const { resolver } = serviceWith({ list: () => okPage([{ name: "other", root_path: "/work/other" }]) });
 
-    await expect(service.resolveProject(undefined, "/home/user")).rejects.toThrow(/cwd "\/home\/user", which has no git root/);
-    await expect(service.resolveProject(undefined, "/home/user")).rejects.toThrow(/indexed projects: other -> \/work\/other/);
-    await expect(service.resolveProject(undefined, "/home/user")).rejects.toThrow(/absolute path/);
+    await expect(resolver.resolveProject(undefined, "/home/user")).rejects.toThrow(/cwd "\/home\/user", which has no git root/);
+    await expect(resolver.resolveProject(undefined, "/home/user")).rejects.toThrow(/indexed projects: other -> \/work\/other/);
+    await expect(resolver.resolveProject(undefined, "/home/user")).rejects.toThrow(/absolute path/);
   });
 
   it("says so when no project is indexed at all", async () => {
-    const { service } = serviceWith({ list: () => okPage([]) });
+    const { resolver } = serviceWith({ list: () => okPage([]) });
 
-    await expect(service.resolveProject(undefined, "/home/user")).rejects.toThrow(/no projects are indexed yet/);
+    await expect(resolver.resolveProject(undefined, "/home/user")).rejects.toThrow(/no projects are indexed yet/);
   });
 
   it("maps an explicit absolute path, with or without a trailing slash, to the project name", async () => {
-    const { service } = serviceWith();
+    const { resolver } = serviceWith();
 
-    await expect(service.resolveProject("/work/repo/src", "/home/user")).resolves.toBe("repo");
-    await expect(service.resolveProject("/work/repo/", "/home/user")).resolves.toBe("repo");
+    await expect(resolver.resolveProject("/work/repo/src", "/home/user")).resolves.toBe("repo");
+    await expect(resolver.resolveProject("/work/repo/", "/home/user")).resolves.toBe("repo");
   });
 
   it("resolves an explicitly relative path against the cwd", async () => {
-    const { service } = serviceWith();
+    const { resolver } = serviceWith();
 
-    await expect(service.resolveProject(".", "/work/repo/src")).resolves.toBe("repo");
-    await expect(service.resolveProject("./src", "/work/repo")).resolves.toBe("repo");
-    await expect(service.resolveProject("..", "/work/repo/src")).resolves.toBe("repo");
+    await expect(resolver.resolveProject(".", "/work/repo/src")).resolves.toBe("repo");
+    await expect(resolver.resolveProject("./src", "/work/repo")).resolves.toBe("repo");
+    await expect(resolver.resolveProject("..", "/work/repo/src")).resolves.toBe("repo");
   });
 
   it("rejects an unknown bare name even when the cwd is inside another indexed project", async () => {
-    const { service } = serviceWith({ list: () => okPage([{ name: "my-repo", root_path: "/work/my-repo" }]), gitRoot: "/work/my-repo" });
+    const { resolver } = serviceWith({ list: () => okPage([{ name: "my-repo", root_path: "/work/my-repo" }]), gitRoot: "/work/my-repo" });
 
-    await expect(service.resolveProject("other-repo", "/work/my-repo/src")).rejects.toThrow(/given value "other-repo"/);
+    await expect(resolver.resolveProject("other-repo", "/work/my-repo/src")).rejects.toThrow(/given value "other-repo"/);
   });
 
   it("rejects an unknown project name with the actionable list, not symbol-not-found", async () => {
     let message = "";
     try {
-      await serviceWith().service.resolveProject("home-user", "/home/user");
+      await serviceWith().resolver.resolveProject("home-user", "/home/user");
       expect.unreachable("unknown project should throw");
     } catch (error) {
       message = (error as Error).message;
@@ -110,10 +118,10 @@ describe("ProjectService.resolveProject", () => {
   });
 
   it("caches list_projects across resolutions within the TTL", async () => {
-    const { service, listArgs } = serviceWith();
+    const { resolver, listArgs } = serviceWith();
 
-    await service.resolveProject(undefined, "/work/repo");
-    await service.resolveProject("/work/repo/src", "/home/user");
+    await resolver.resolveProject(undefined, "/work/repo");
+    await resolver.resolveProject("/work/repo/src", "/home/user");
 
     expect(listArgs).toHaveLength(1);
   });
@@ -121,11 +129,11 @@ describe("ProjectService.resolveProject", () => {
   it("re-lists after the cache TTL expires", async () => {
     vi.useFakeTimers();
     try {
-      const { service, listArgs } = serviceWith();
+      const { resolver, listArgs } = serviceWith();
 
-      await service.resolveProject(undefined, "/work/repo");
+      await resolver.resolveProject(undefined, "/work/repo");
       vi.advanceTimersByTime(10_001);
-      await service.resolveProject(undefined, "/work/repo");
+      await resolver.resolveProject(undefined, "/work/repo");
 
       expect(listArgs).toHaveLength(2);
     } finally {
@@ -134,40 +142,40 @@ describe("ProjectService.resolveProject", () => {
   });
 
   it("retries past a stale cache so a project indexed since the last list still resolves", async () => {
-    const { service, listArgs } = serviceWith({
+    const { resolver, listArgs } = serviceWith({
       list: (_args, call) => (call === 1 ? okPage([]) : okPage([{ name: "repo", root_path: "/work/repo" }])),
     });
 
-    await expect(service.resolveProject("repo", "/home/user")).resolves.toBe("repo");
+    await expect(resolver.resolveProject("repo", "/home/user")).resolves.toBe("repo");
     expect(listArgs).toHaveLength(2);
   });
 
   it("pages through list_projects until has_more is false", async () => {
     const firstPage = Array.from({ length: 50 }, (_, index) => ({ name: `p${index}`, root_path: `/work/p${index}` }));
-    const { service, listArgs } = serviceWith({
+    const { resolver, listArgs } = serviceWith({
       list: (_args, call) => (call === 1 ? okPage(firstPage, true) : okPage([{ name: "target", root_path: "/target" }])),
     });
 
-    await expect(service.resolveProject("target", "/home/user")).resolves.toBe("target");
+    await expect(resolver.resolveProject("target", "/home/user")).resolves.toBe("target");
     expect(listArgs).toHaveLength(2);
     expect(listArgs[0]).toMatchObject({ limit: 50, offset: 0 });
     expect(listArgs[1]).toMatchObject({ limit: 50, offset: 50 });
   });
 
   it("does not cache a failed list_projects", async () => {
-    const { service, listArgs } = serviceWith({
+    const { resolver, listArgs } = serviceWith({
       list: (_args, call) => (call === 1 ? errorResult("boom") : okPage([{ name: "repo", root_path: "/work/repo" }])),
     });
 
-    await expect(service.resolveProject("repo", "/home/user")).rejects.toThrow(/boom/);
-    await expect(service.resolveProject("repo", "/home/user")).resolves.toBe("repo");
+    await expect(resolver.resolveProject("repo", "/home/user")).rejects.toThrow(/boom/);
+    await expect(resolver.resolveProject("repo", "/home/user")).resolves.toBe("repo");
     expect(listArgs).toHaveLength(2);
   });
 
   it("lets an aborted caller stop waiting without cancelling the shared fetch", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
-    const { service, listArgs } = serviceWith({
+    const { resolver, listArgs } = serviceWith({
       list: async () => {
         await gate;
         return okPage([{ name: "repo", root_path: "/work/repo" }]);
@@ -175,8 +183,8 @@ describe("ProjectService.resolveProject", () => {
     });
 
     const controller = new AbortController();
-    const aborted = service.resolveProject("repo", "/home/user", controller.signal);
-    const waiting = service.resolveProject("repo", "/home/user");
+    const aborted = resolver.resolveProject("repo", "/home/user", controller.signal);
+    const waiting = resolver.resolveProject("repo", "/home/user");
     controller.abort();
 
     await expect(aborted).rejects.toThrow(/cancelled/);
@@ -187,22 +195,31 @@ describe("ProjectService.resolveProject", () => {
 
   it("does not let an aborted caller hide the project root from a concurrent caller", async () => {
     let release!: (value: CbmCallResult) => void;
-    const { service } = serviceWith({ list: () => new Promise<CbmCallResult>((resolve) => (release = resolve)) });
+    const { catalog } = serviceWith({ list: () => new Promise<CbmCallResult>((resolve) => (release = resolve)) });
     const controller = new AbortController();
-    const aborted = service.relativizePaths({ file_path: "/work/repo/src/a.ts" }, "repo", controller.signal);
-    const waiting = service.relativizePaths({ file_path: "/work/repo/src/a.ts" }, "repo");
+    const aborted = catalog.relativizePaths({ file_path: "/work/repo/src/a.ts" }, "repo", controller.signal);
+    const waiting = catalog.relativizePaths({ file_path: "/work/repo/src/a.ts" }, "repo");
     controller.abort();
     release(okPage([{ name: "repo", root_path: "/work/repo" }]));
 
     await aborted;
     await expect(waiting).resolves.toEqual({ file_path: "src/a.ts" });
-    await expect(service.relativizePaths({ file_path: "/work/repo/src/a.ts" }, "repo")).resolves.toEqual({ file_path: "src/a.ts" });
+    await expect(catalog.relativizePaths({ file_path: "/work/repo/src/a.ts" }, "repo")).resolves.toEqual({ file_path: "src/a.ts" });
   });
+
+  it.runIf(process.platform === "darwin" || process.platform === "win32")(
+    "relativizes a path whose case differs from the root on a case-insensitive filesystem",
+    async () => {
+      const { catalog } = serviceWith({ list: () => okPage([{ name: "repo", root_path: "/Work/Repo/" }]) });
+
+      await expect(catalog.relativizePaths({ file_path: "/work/repo/src/a.ts" }, "repo")).resolves.toEqual({ file_path: "src/a.ts" });
+    },
+  );
 
   it("does not cache a fetch that raced an index", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
-    const { service, listArgs } = serviceWith({
+    const { catalog, indexing, listArgs } = serviceWith({
       gitRoot: "/work/repo",
       list: async (_args, call) => {
         if (call === 1) {
@@ -217,12 +234,12 @@ describe("ProjectService.resolveProject", () => {
       },
     });
 
-    const stale = service.listProjects();
-    await service.indexCurrentRepo("/work/repo");
+    const stale = catalog.list();
+    await indexing.indexCurrentRepo("/work/repo");
     release();
     await expect(stale).resolves.toEqual([]);
 
-    await expect(service.listProjects()).resolves.toEqual([{ name: "repo", root_path: "/work/repo" }]);
+    await expect(catalog.list()).resolves.toEqual([{ name: "repo", root_path: "/work/repo" }]);
     expect(listArgs).toHaveLength(2);
   });
 
@@ -233,9 +250,9 @@ describe("ProjectService.resolveProject", () => {
       await mkdir(real);
       const link = join(base, "link-repo");
       await symlink(real, link, "dir");
-      const { service } = serviceWith({ list: () => okPage([{ name: "repo", root_path: real }]) });
+      const { resolver } = serviceWith({ list: () => okPage([{ name: "repo", root_path: real }]) });
 
-      await expect(service.resolveProject(undefined, link)).resolves.toBe("repo");
+      await expect(resolver.resolveProject(undefined, link)).resolves.toBe("repo");
     } finally {
       await rm(base, { recursive: true, force: true });
     }

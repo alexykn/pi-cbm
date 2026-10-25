@@ -30,7 +30,7 @@ describe("lifecycle auto-refresh", () => {
     } as unknown as ExtensionAPI;
     const indexCurrentRepo = vi.fn().mockResolvedValue({ status: "indexed", project: "repo" });
     const services = {
-      projects: { indexCurrentRepo },
+      indexing: { indexCurrentRepo },
       settings: { reload: vi.fn() },
     } as unknown as CbmServices;
     const context = {
