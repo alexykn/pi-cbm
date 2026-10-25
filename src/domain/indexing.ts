@@ -56,9 +56,9 @@ type AutoIndexTarget =
   | { ok: false; reason: string };
 
 /** `reference` is when the current graph was taken, when known. */
-type FreshnessCheck = { fresh: true; reference: number } | { fresh: false; reference?: number };
+type FreshnessCheck = { fresh: true; reference: number } | { fresh: false; reference?: number; recordStartedAt?: number };
 
-type RefreshProgress = { reference?: number; queuedAt: number; indexingSince?: number };
+type RefreshProgress = { reference?: number; queuedAt: number; indexingSince?: number; seen: FreshnessCheck };
 
 type Refresh = { progress: RefreshProgress; result: Promise<IndexFreshness> };
 
@@ -119,11 +119,9 @@ export class IndexingService {
       return { status: "skipped", reason: target.reason };
     }
     const project = await this.projectAt(target.path, signal);
-    if (project) {
-      const check = await this.checkFreshness(project, target.path, signal);
-      if (check.fresh) return { status: "fresh", project, age_ms: Date.now() - check.reference };
-    }
-    return this.indexPath(target.path, project, signal);
+    const check = project ? await this.checkFreshness(project, target.path, signal) : undefined;
+    if (project && check?.fresh) return { status: "fresh", project, age_ms: Date.now() - check.reference };
+    return this.indexPath(target.path, project, signal, check);
   }
 
   /**
@@ -145,12 +143,12 @@ export class IndexingService {
     if (joinedResult && !joinedResult.fresh) return joinedResult;
     const check = await this.checkFreshness(project, root, ctx.signal);
     if (check.fresh) return { fresh: true, reindexed: joinedResult?.reindexed ?? false, age_ms: Date.now() - check.reference };
-    const refresh = this.refreshes.get(key) ?? this.startRefresh(key, project, root, check.reference);
+    const refresh = this.refreshes.get(key) ?? this.startRefresh(key, project, root, check);
     return this.awaitRefresh(refresh, ctx.signal, deadline);
   }
 
   /** Index an exact path through the coordinator lease; skipped when another session holds it. */
-  private async indexPath(path: string, project: string | undefined, signal: AbortSignal | undefined): Promise<IndexResult> {
+  private async indexPath(path: string, project: string | undefined, signal: AbortSignal | undefined, seen?: FreshnessCheck): Promise<IndexResult> {
     const validation = validateAutoIndexPath(path);
     if (!validation.ok) {
       return { status: "skipped", reason: validation.reason };
@@ -161,6 +159,9 @@ export class IndexingService {
       return { status: "skipped", reason: coordination.reason };
     }
     try {
+      // Another session may have indexed between this one's check and the lease.
+      const check = project && seen ? await this.recheckUnderLease(project, validation.path, seen, signal) : undefined;
+      if (project && check?.fresh) return { status: "fresh", project, age_ms: Date.now() - check.reference };
       return await this.runIndex(validation.path, project, coordination.lease);
     } finally {
       await coordination.lease.release();
@@ -199,14 +200,21 @@ export class IndexingService {
   private async checkFreshness(project: string, root: string, signal?: AbortSignal): Promise<FreshnessCheck> {
     const record = await this.readRecord(project, root);
     const newest = await newestChangeMs(root, signal);
-    if (newest === undefined) return { fresh: false, reference: record?.startedAt };
+    if (newest === undefined) return { fresh: false, reference: record?.startedAt, recordStartedAt: record?.startedAt };
     // graphReference is never earlier than the record's start, so unchanged since the start means fresh,
     // without the cost of an index_status call (one cbm process, about a second).
     if (record && isUnchangedSince(newest, record.startedAt)) return { fresh: true, reference: record.startedAt };
 
     const reference = graphReference(record, await this.indexedAt(project, signal));
     if (reference !== undefined && isUnchangedSince(newest, reference)) return { fresh: true, reference };
-    return { fresh: false, reference };
+    return { fresh: false, reference, recordStartedAt: record?.startedAt };
+  }
+
+  /** Under the lease: has another index finished since `seen` was checked? Then check again before indexing. */
+  private async recheckUnderLease(project: string, root: string, seen: FreshnessCheck, signal?: AbortSignal): Promise<FreshnessCheck> {
+    const record = await this.readRecord(project, root);
+    if (seen.fresh || record?.startedAt === seen.recordStartedAt) return seen;
+    return this.checkFreshness(project, root, signal);
   }
 
   private async readRecord(project: string, root: string): Promise<IndexRecord | undefined> {
@@ -236,8 +244,8 @@ export class IndexingService {
   }
 
   /** One refresh per project at a time; it runs without any caller's signal so it can outlive their waits. */
-  private startRefresh(key: string, project: string, root: string, reference: number | undefined): Refresh {
-    const progress: RefreshProgress = { reference, queuedAt: Date.now() };
+  private startRefresh(key: string, project: string, root: string, seen: FreshnessCheck): Refresh {
+    const progress: RefreshProgress = { reference: seen.reference, queuedAt: Date.now(), seen };
     const refresh: Refresh = {
       progress,
       result: this.refresh(project, root, progress).finally(() => {
@@ -269,12 +277,10 @@ export class IndexingService {
       const acquired = await this.acquireForRefresh(validation.path);
       if (!acquired.ok) return stale(`index not refreshed: ${acquired.reason}`);
       try {
-        // Another index held the lease; it may already cover the changes.
-        if (acquired.waited) {
-          const check = await this.checkFreshness(project, root);
-          if (check.fresh) return { fresh: true, reindexed: false, age_ms: Date.now() - check.reference };
-          progress.reference = check.reference;
-        }
+        // Another index held the lease or finished since the caller's check; it may already cover the changes.
+        const check = acquired.waited ? await this.checkFreshness(project, root) : await this.recheckUnderLease(project, root, progress.seen);
+        if (check.fresh) return { fresh: true, reindexed: false, age_ms: Date.now() - check.reference };
+        progress.reference = check.reference;
         const indexingSince = Date.now();
         progress.indexingSince = indexingSince;
         await this.runIndex(validation.path, project, acquired.lease);

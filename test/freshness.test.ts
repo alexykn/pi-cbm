@@ -289,6 +289,30 @@ describe("auto-refresh freshness", { timeout: 15_000 }, () => {
     expect(await indexCalls(ws)).toHaveLength(2);
   });
 
+  it("does not re-index when another session indexed between this session's check and its lease", async () => {
+    const ws = await workspace(FILES);
+    await knownProjects(ws, STALE);
+    await holdIndexes(ws);
+    const first = session(ws).indexing.indexCurrentRepo(ws.root);
+    await waitForIndexStart(ws);
+
+    // The second session checks while the first index runs, but gets the lease only after it finished.
+    const coordinator = new IndexCoordinator({ cacheDirectory: ws.cacheDirectory });
+    const acquire = coordinator.acquire.bind(coordinator);
+    coordinator.acquire = async (...args: Parameters<typeof acquire>) => {
+      await first;
+      return acquire(...args);
+    };
+    const cbm = new CbmClient();
+    const second = new IndexingService(cbm, { autoIndexNonGitDirectories: true }, coordinator, new ProjectCatalog(cbm)).indexCurrentRepo(ws.root);
+    await sleep(1_500);
+    await releaseIndexes(ws);
+
+    expect(await first).toMatchObject({ status: "indexed" });
+    expect(await second).toMatchObject({ status: "fresh" });
+    expect(await indexCalls(ws)).toHaveLength(1);
+  });
+
   it("always indexes a non-git root", async () => {
     const ws = await workspace(FILES, { git: false });
     const s = session(ws);
