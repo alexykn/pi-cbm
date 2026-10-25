@@ -11,14 +11,14 @@ import type { TraceService } from "../src/domain/trace.js";
 
 const CTX: ToolExecutionContext = { cwd: "/tmp/cbm-fixture-repo" };
 
-function queryServiceWith(callTool: (tool: string, args: Record<string, unknown>) => CbmCallResult | Promise<CbmCallResult>): QueryService {
+const LISTED: CbmCallResult = { ok: true, data: { projects: [{ name: "repo", root_path: "/tmp/cbm-fixture-repo" }], has_more: false }, rawText: "", stderr: "" };
+
+function queryServiceWith(
+  callTool: (tool: string, args: Record<string, unknown>) => CbmCallResult | Promise<CbmCallResult>,
+  listed: CbmCallResult = LISTED,
+): QueryService {
   const cbm = {
-    callTool: async (tool: string, args: Record<string, unknown>): Promise<CbmCallResult> => {
-      if (tool === "list_projects") {
-        return { ok: true, data: { projects: [{ name: "repo", root_path: "/tmp/cbm-fixture-repo" }], has_more: false }, rawText: "", stderr: "" };
-      }
-      return callTool(tool, args);
-    },
+    callTool: async (tool: string, args: Record<string, unknown>): Promise<CbmCallResult> => (tool === "list_projects" ? listed : callTool(tool, args)),
     findGitRoot: async () => undefined,
   } as unknown as CbmClient;
   const catalog = new ProjectCatalog(cbm);
@@ -50,6 +50,14 @@ describe("QueryService project errors", () => {
 
     expect(message).toMatch(/^project not found or not indexed Run list_projects to see indexed projects\. available_projects: tmp-cbm-fixture-repo No indexed project/);
     expect(message).not.toContain('{"');
+  });
+
+  it("leaves an explicit project to cbm when list_projects fails and says the list is unavailable", async () => {
+    const service = queryServiceWith(projectError, { ok: false, data: { error: "list timed out" }, rawText: "", stderr: "" });
+
+    await expect(service.queryGraph({ project: "typo-repo" }, CTX)).rejects.toThrow(
+      /^project not found or not indexed .*No indexed project matches the given value "typo-repo".*the indexed project list could not be read/,
+    );
   });
 
   it("rethrows a query-tool project error with the actionable project list", async () => {

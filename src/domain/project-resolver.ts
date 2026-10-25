@@ -56,6 +56,15 @@ function compareRoots(a: ProjectRoot, b: ProjectRoot): number {
   );
 }
 
+/** `undefined` means `list_projects` itself failed. */
+function availableProjects(projects: CbmProject[] | undefined): string {
+  if (!projects) return "the indexed project list could not be read";
+  const listed = projects.slice(0, MAX_LISTED_PROJECTS).map((project) => `${project.name} -> ${project.root_path ?? "(unknown root)"}`);
+  if (listed.length === 0) return "no projects are indexed yet";
+  const more = projects.length > listed.length ? ` (+${projects.length - listed.length} more)` : "";
+  return `indexed projects: ${listed.join(", ")}${more}`;
+}
+
 /** Turns a tool's optional `project` (name, path, or nothing) into an indexed project name. */
 export class ProjectResolver {
   constructor(
@@ -75,7 +84,14 @@ export class ProjectResolver {
    */
   async resolveProject(explicit: unknown, cwd: string, signal?: AbortSignal): Promise<string> {
     const given = typeof explicit === "string" ? explicit.trim() : "";
-    let projects = await this.catalog.list(signal);
+    let projects: CbmProject[];
+    try {
+      projects = await this.catalog.list(signal);
+    } catch (error) {
+      // Without a list, an explicit name goes to cbm as is; its own "project not found" stays the error path.
+      if (signal?.aborted || !given || looksLikePath(given)) throw error;
+      return given;
+    }
     let name = await this.tryResolveProject(given, cwd, projects, signal);
     if (name) return name;
 
@@ -95,7 +111,7 @@ export class ProjectResolver {
     const data = value instanceof CbmToolError ? value.data : value;
     const text = errorTextWithDetails(data);
     if (!isProjectError(data)) return value instanceof Error ? value : new Error(text);
-    const projects = await this.catalog.list(ctx.signal).catch(() => []);
+    const projects = await this.catalog.list(ctx.signal).catch(() => undefined);
     const gitRoot = await this.gitRootOrUndefined(ctx.cwd, ctx.signal);
     return new Error(`${text} ${this.projectResolutionMessage(project || undefined, ctx.cwd, gitRoot, projects)}`);
   }
@@ -153,16 +169,18 @@ export class ProjectResolver {
     return roots.filter(({ root }) => paths.some((path) => isWithin(root, path))).sort(compareRoots)[0]?.project;
   }
 
-  private projectResolutionMessage(given: string | undefined, cwd: string, gitRoot: string | undefined, projects: CbmProject[]): string {
-    const listed = projects.slice(0, MAX_LISTED_PROJECTS).map((project) => `${project.name} -> ${project.root_path ?? "(unknown root)"}`);
-    const more = projects.length > listed.length ? ` (+${projects.length - listed.length} more)` : "";
-    const available = listed.length > 0 ? `indexed projects: ${listed.join(", ")}${more}` : "no projects are indexed yet";
+  private projectResolutionMessage(
+    given: string | undefined,
+    cwd: string,
+    gitRoot: string | undefined,
+    projects: CbmProject[] | undefined,
+  ): string {
     let tried = `cwd "${cwd}", which has no git root`;
     if (given) tried = `the given value "${given}" (as a project name or path)`;
     else if (gitRoot) tried = `cwd "${cwd}" and its git root "${gitRoot}"`;
     return [
       `No indexed project matches ${tried}.`,
-      available,
+      availableProjects(projects),
       "pass `project` as one of these names or as the repo's absolute path (required when the cwd is outside the repo)",
       "if the repository was just indexed, indexing may still be running",
     ].join("; ");

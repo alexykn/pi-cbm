@@ -182,9 +182,16 @@ describe("project resolution", () => {
       list: (_args, call) => (call === 1 ? errorResult("boom") : okPage([{ name: "repo", root_path: "/work/repo" }])),
     });
 
-    await expect(resolver.resolveProject("repo", "/home/user")).rejects.toThrow(/boom/);
-    await expect(resolver.resolveProject("repo", "/home/user")).resolves.toBe("repo");
+    await expect(resolver.resolveProject(undefined, "/work/repo")).rejects.toThrow(/boom/);
+    await expect(resolver.resolveProject(undefined, "/work/repo")).resolves.toBe("repo");
     expect(listArgs).toHaveLength(2);
+  });
+
+  it("passes an explicit name through when list_projects fails, leaving the verdict to cbm", async () => {
+    const { resolver } = serviceWith({ list: () => errorResult("boom") });
+
+    await expect(resolver.resolveProject("repo", "/home/user")).resolves.toBe("repo");
+    await expect(resolver.resolveProject("/work/repo", "/home/user")).rejects.toThrow(/boom/);
   });
 
   it("lets an aborted caller stop waiting without cancelling the shared fetch", async () => {
